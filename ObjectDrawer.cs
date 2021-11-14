@@ -47,7 +47,6 @@ namespace cratesmith.assetui
 				baseHeight += EditorGUIUtility.standardVerticalSpacing*2;
 
 				var so = new SerializedObject(data);
-				var any = false;
 				var iterator = so.GetIterator();
 				iterator.NextVisible(true);
 				while (iterator.NextVisible(false))
