@@ -96,7 +96,7 @@ namespace cratesmith.assetui
 				ToolManager.RestorePreviousTool();
 				return;
 			}
-
+  
 			if (Event.current.type == EventType.MouseMove)
 			{
 				var filter = typeof(Component).IsAssignableFrom(m_PropType) 
@@ -115,7 +115,6 @@ namespace cratesmith.assetui
 			}
 
 			if (Event.current.type == EventType.MouseDown
-			    && sceneView.position.Contains(Event.current.mousePosition) 
 			    && Event.current.button==0
 			    && m_PickObj)
 			{
