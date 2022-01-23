@@ -7,3 +7,4 @@ To install:
 3. Select "add from git url"
 4. Pate in the following url and press enter: https://github.com/Cratesmith/Cratesmith.AssetUI.git
 
+... or just check out the files and dump them somewhere in your project.
