@@ -2,7 +2,7 @@
 	"name": "com.cratesmith.assetui",
 	"displayName": "Cratesmith.AssetUI",
 	"description": "Popout Inspector and ScriptableObject aware default object reference PropertyDrawer",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"unity": "2021.1",
 	"license": "MIT",
 	"repository": {
