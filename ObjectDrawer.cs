@@ -4,9 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
-using UnityEditor.Experimental.SceneManagement;
 using UnityEditor.SceneManagement;
-using UnityEditorInternal;
 using UnityEngine;
 using static UnityEditor.AssetDatabase;
 using Object = UnityEngine.Object;
@@ -18,7 +16,6 @@ namespace cratesmith.assetui
 	{
 		static Texture2D                                     s_ExpandButton;
 		static Texture2D                                     s_NewButton;
-		static Dictionary<(object, string, string), ReorderableList> s_Lists = new Dictionary<(object, string, string), ReorderableList>();
 
 		static Texture2D ExpandButton => s_ExpandButton
 			? s_ExpandButton
@@ -32,14 +29,9 @@ namespace cratesmith.assetui
 				GUIDToAssetPath(
 					FindAssets("objectdrawer_new t:texture").FirstOrDefault()));
 
-		static Dictionary<Type, (Type type, CreateAssetMenuAttribute attribute)[]> s_cachedTypes = new Dictionary<Type, (Type type, CreateAssetMenuAttribute attribute)[]>();
+		static Dictionary<Type, (Type type, Attribute attribute)[]> s_cachedTypes = new Dictionary<Type, (Type type, Attribute attribute)[]>();
 
 		public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
-		{
-			return CalcPropertyHeight(property, label);
-		}
-		
-		public static float CalcPropertyHeight(SerializedProperty property, GUIContent label)
 		{
 			float baseHeight = EditorGUIUtility.singleLineHeight;
 
@@ -62,17 +54,13 @@ namespace cratesmith.assetui
 				while (iterator.NextVisible(false))
 				{
 					var current = iterator.Copy();
-					if (TryGetSublist(property, current, out var list))
-						foldoutHeight += list.GetHeight() + EditorGUIUtility.standardVerticalSpacing;   
-					else 
-						foldoutHeight += EditorGUI.GetPropertyHeight(current, label, true) + EditorGUIUtility.standardVerticalSpacing;
+					foldoutHeight += EditorGUI.GetPropertyHeight(current, label, true) + EditorGUIUtility.standardVerticalSpacing;
 				}
 				baseHeight += Mathf.Max(EditorGUIUtility.singleLineHeight, foldoutHeight);
 			}
-
 			return baseHeight;
 		}
-
+		
 		public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
 		{
 			PropertyField(position, property, label);
@@ -80,32 +68,32 @@ namespace cratesmith.assetui
 
 		public static void ObjectField(Rect position, SerializedProperty property, Type objType, GUIContent label)
 		{
-			Rect propertyFieldRect = PropertyFieldLeft(position, property);
+			Rect propertyFieldRect = PropertyFieldRight(position, property);
 			EditorGUI.ObjectField(propertyFieldRect, property, objType, label);
-			PropertyFieldRight(position, property, label);
+			PropertyFieldLeft(position, property);
 		}
 
 		public static void ObjectField(Rect position, SerializedProperty property, Type objType)
 		{
-			Rect propertyFieldRect = PropertyFieldLeft(position, property);
+			Rect propertyFieldRect = PropertyFieldRight(position, property);
 			EditorGUI.ObjectField(propertyFieldRect, property, objType);
-			PropertyFieldRight(position, property, GUIContent.none);
+			PropertyFieldLeft(position, property);
 		}
 
 		public static void PropertyField(Rect position, SerializedProperty property, GUIContent label)
 		{
-			Rect propertyFieldRect = PropertyFieldLeft(position, property);
+			Rect propertyFieldRect = PropertyFieldRight(position, property);
 			EditorGUI.PropertyField(propertyFieldRect, property, label, true);
-			PropertyFieldRight(position, property, label);
+			PropertyFieldLeft(position, property);
 		}
-		static void PropertyFieldRight(Rect position, SerializedProperty property, GUIContent label)
+		static void PropertyFieldLeft(Rect position, SerializedProperty property)
 		{
 			if (property.propertyType==SerializedPropertyType.ObjectReference && property.objectReferenceValue && !property.hasMultipleDifferentValues)
 			{
-				DrawScriptableObjectFoldout(position, property, label);
+				DrawScriptableObjectFoldout(position, property);
 			}
 		}
-		static Rect PropertyFieldLeft(Rect position, SerializedProperty property)
+		static Rect PropertyFieldRight(Rect position, SerializedProperty property)
 		{
 			Rect popupWindowRect = new Rect(GUIUtility.GUIToScreenPoint(position.position - Vector2.right * 416),
 			                                new Vector2(400, 500));
@@ -153,119 +141,82 @@ namespace cratesmith.assetui
 			return propertyFieldRect;
 		}
 
-		static void DrawScriptableObjectFoldout(Rect position, SerializedProperty property, GUIContent label)
+		static void DrawScriptableObjectFoldout(Rect position, SerializedProperty property)
 		{
 			ScriptableObject data = !property.hasMultipleDifferentValues
 				? property.objectReferenceValue as ScriptableObject
 				: null;
 
-			if (data)
+			if (!data)
 			{
-				float y = position.y + EditorGUIUtility.singleLineHeight + EditorGUIUtility.standardVerticalSpacing;
-
-				Rect foldoutRect = new Rect(position.position,
-				                            new Vector2(position.width, EditorGUIUtility.singleLineHeight));
-
-				GUI.color = Color.cyan;
-
-				property.isExpanded = EditorGUI.Foldout(foldoutRect,
-				                                        property.isExpanded,
-				                                        "",
-				                                        true);
-
-				GUI.color = Color.white;
-
-				if (property.isExpanded)
-				{
-					var prevLabelWidth = EditorGUIUtility.labelWidth;
-					EditorGUIUtility.labelWidth -= 15f;
-					//using (new EditorGUI.IndentLevelScope())
-					{
-						float fullHeight = CalcPropertyHeight(property, label);
-
-						GUI.Box(new Rect(position.x + EditorGUI.indentLevel * 15f,
-						                 position.y + EditorGUIUtility.singleLineHeight,
-						                 position.width - EditorGUI.indentLevel * 15f + 2,
-						                 Mathf.Max(fullHeight - EditorGUIUtility.singleLineHeight,EditorGUIUtility.singleLineHeight)),
-						        "");
-
-						y += EditorGUIUtility.standardVerticalSpacing;
-					}
-
-					SerializedObject so = new SerializedObject(data);
-					EditorGUI.BeginChangeCheck();
-
-					SerializedProperty iterator = so.GetIterator();
-					iterator.NextVisible(true);
-
-					int count = 0;
-					while (iterator.NextVisible(false))
-					{
-						var current = iterator.Copy();
-						float childHeight = CalcPropertyHeight(iterator, new GUIContent(iterator.displayName));
-						Rect childRect = new Rect(position.x + 15f, y, position.width - 15f, childHeight);
-						if (TryGetSublist(property, current, out var list))
-							list.DoList(childRect);
-						else
-							EditorGUI.PropertyField(childRect, current, true);
-						y += childHeight + EditorGUIUtility.standardVerticalSpacing;
-						++count;
-					}
-
-					if (count == 0)
-					{
-						Rect childRect = new Rect(position.x + 15f, y, position.width - 15f, EditorGUIUtility.singleLineHeight);
-						GUI.Label(childRect, "No properties");
-						y += EditorGUIUtility.singleLineHeight;
-					}
-					
-					if (EditorGUI.EndChangeCheck())
-					{
-						so.ApplyModifiedProperties();
-					}
-					EditorGUIUtility.labelWidth = prevLabelWidth;
-				}
-			}
-		}
-		static bool TryGetSublist(SerializedProperty ownerProperty, SerializedProperty property, out ReorderableList list)
-		{
-			if (ownerProperty == null || property == null || !property.isArray || property.arraySize==0)
-			{
-				list = null;
-				return false;
+				return;
 			}
 
-			var key = (ownerProperty.serializedObject, ownerProperty.propertyPath, property.propertyPath);
-			if (!s_Lists.TryGetValue(key, out list))
+			Rect foldoutRect = new Rect(position.position,
+			                            new Vector2(position.width, EditorGUIUtility.singleLineHeight));
+
+			GUI.color = Color.cyan;
+			property.isExpanded = EditorGUI.Foldout(foldoutRect,
+			                                        property.isExpanded,
+			                                        "",
+			                                        true);
+			GUI.color = Color.white;
+			if (!property.isExpanded)
 			{
-				var newList = list = s_Lists[key] = new ReorderableList(property.serializedObject, property, true, false, true, true);
-				list.drawElementCallback = (rect, index, active, focused) =>
-				{
-					var current = newList.serializedProperty.GetArrayElementAtIndex(index);
-					var prevWidth = EditorGUIUtility.labelWidth;
-					EditorGUIUtility.labelWidth = Mathf.Min(CalcMaxLabelWidth(newList.serializedProperty), EditorGUIUtility.labelWidth);
-					EditorGUI.PropertyField(rect, current);
-					EditorGUIUtility.labelWidth = prevWidth;
-				};
-				list.elementHeightCallback = delegate(int index)
-				{
-					return EditorGUI.GetPropertyHeight(newList.serializedProperty.GetArrayElementAtIndex(index));
-				};
+				return;
 			}
-			return true;
-		}
-		static float CalcMaxLabelWidth(SerializedProperty property)
-		{
-			var width = 0f;
-			var iterator = property.Copy();
+			
+			SerializedObject so = new SerializedObject(data);
+			int count = 0;
+			float fullHeight = 0f;
+			SerializedProperty iterator = so.GetIterator();
 			iterator.NextVisible(true);
 			while (iterator.NextVisible(false))
 			{
-				width = Mathf.Max(GUI.skin.label.CalcSize(new GUIContent(property.displayName)).x+20, width);
+				float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
+				fullHeight += childHeight + EditorGUIUtility.standardVerticalSpacing;
+				++count;
 			}
-			return width;
-		}
+			fullHeight = Mathf.Max(EditorGUIUtility.singleLineHeight, fullHeight);
+				
+			var boxRect = new Rect(position.x + EditorGUI.indentLevel * 15f,
+			                       position.y + EditorGUIUtility.singleLineHeight,
+			                       position.width - EditorGUI.indentLevel * 15f + 2,
+			                       Mathf.Max(fullHeight, EditorGUIUtility.singleLineHeight));
 
+			GUI.Box(boxRect, "");
+
+			if (count == 0)
+				GUI.Label(boxRect, "No properties");
+
+			var prevLabelWidth = EditorGUIUtility.labelWidth;
+				
+			EditorGUI.BeginChangeCheck();
+
+			using (new EditorGUI.IndentLevelScope())
+			{
+				float y = position.y + EditorGUIUtility.singleLineHeight + EditorGUIUtility.standardVerticalSpacing;
+				iterator = so.GetIterator();
+				iterator.NextVisible(true);
+				while (iterator.NextVisible(false))
+				{
+					var current = iterator.Copy();
+					float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
+					Rect childRect = new Rect(position.x, y, position.width, childHeight);
+					EditorGUI.PropertyField(childRect, current, true);
+					y += childHeight + EditorGUIUtility.standardVerticalSpacing;
+					++count;
+				}
+			}
+
+
+			if (EditorGUI.EndChangeCheck())
+			{
+				so.ApplyModifiedProperties();
+			}
+			EditorGUIUtility.labelWidth = prevLabelWidth;
+		}
+		
 		static void DrawPopoutInspector(Rect position, SerializedProperty property, Rect popupWindowRect)
 		{
 			if (property.objectReferenceValue != null && !property.hasMultipleDifferentValues)
@@ -282,6 +233,86 @@ namespace cratesmith.assetui
 			}
 		}
 
+		static Type[] s_AllTypes;
+		static Type[] AllTypes => s_AllTypes = s_AllTypes 
+		                                        ?? AppDomain.CurrentDomain.GetAssemblies().SelectMany(x =>
+		                                        {
+			                                        try
+			                                        {
+				                                        return x.GetTypes();
+			                                        }
+			                                        catch (ReflectionTypeLoadException e)
+			                                        {
+				                                        return e.Types.Where(t => t != null);
+			                                        }
+		                                        }).ToArray();
+		
+		static Type s_AssetFileNameExtensionAttributeType;
+		static Type AssetFileNameExtensionAttributeType => s_AssetFileNameExtensionAttributeType = s_AssetFileNameExtensionAttributeType ?? AllTypes.Where(x => x.Name == "AssetFileNameExtensionAttribute").First();
+		static PropertyInfo s_AssetFileNameExtensionAttributePreferredInfoPI;
+		static PropertyInfo AssetFileNameExtensionAttributePreferredInfoPI => s_AssetFileNameExtensionAttributePreferredInfoPI = s_AssetFileNameExtensionAttributePreferredInfoPI ?? AssetFileNameExtensionAttributeType.GetProperty("preferredExtension");
+		
+		
+		private static Attribute GetAssetAttribute(Type t)
+		{
+			if (t == null)
+				return null;
+
+			var caa = t.GetCustomAttribute<CreateAssetMenuAttribute>(true);
+			if (caa!=null)
+				return caa;
+
+			while (t != null)
+			{
+				var asf = t.GetCustomAttribute(AssetFileNameExtensionAttributeType,true);
+				if (asf!=null)
+					return asf;
+
+				t = t.BaseType;
+			}
+
+			return null;
+		}
+		
+		private static string GetAttributeDisplayName(Type type, Attribute attribute)
+		{
+			if (attribute is CreateAssetMenuAttribute caa)
+			{
+				return !string.IsNullOrEmpty(caa.menuName)
+					? caa.menuName.Substring(caa.menuName.LastIndexOf('/') + 1)
+					: type.Name;
+			}
+			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+			{
+				return type.Name;
+			}
+			throw new ArgumentException("Unkown attribute type");
+		}
+
+		private static string GetAttributeFileName(Type type, Attribute attribute)
+		{
+			if (attribute is CreateAssetMenuAttribute caa)
+				return caa.fileName;
+			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+			{
+				return null;
+			}
+
+			throw new ArgumentException("Unkown attribute type");
+		}
+		
+		private static string GetAttributeFileExtension(Type type, Attribute attribute)
+		{
+			if (attribute is CreateAssetMenuAttribute caa)
+				return $"{type.Name}.asset";
+			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+			{
+				return (string)AssetFileNameExtensionAttributePreferredInfoPI.GetValue(attribute);
+			}
+
+			throw new ArgumentException("Unkown attribute type");
+		}
+		
 		static bool DrawCreateScriptableObject(Rect position, SerializedProperty property, Rect popupWindowRect)
 		{
 			Type propType = property.GetSerializedPropertyType();
@@ -291,23 +322,14 @@ namespace cratesmith.assetui
 				return false;
 			}
 
-			if (!s_cachedTypes.TryGetValue(propType, out (Type type, CreateAssetMenuAttribute attribute)[] validTypes))
+			if (!s_cachedTypes.TryGetValue(propType, out (Type type, Attribute attribute)[] validTypes))
 			{
-				s_cachedTypes[propType] = validTypes = AppDomain.CurrentDomain.GetAssemblies()
-				                                                .SelectMany(x =>
-				                                                {
-					                                                try
-					                                                {
-						                                                return x.GetTypes();
-					                                                }
-					                                                catch (ReflectionTypeLoadException e)
-					                                                {
-						                                                return e.Types.Where(t => t != null);
-					                                                }
-				                                                })
-				                                                .Select(t => (type: t, attribute: t?.GetCustomAttribute<CreateAssetMenuAttribute>()))
-				                                                .Where(t => !t.type.IsAbstract && t.attribute != null && propType.IsAssignableFrom(t.type))
-				                                                .ToArray();
+				var candidates = AllTypes.Where(t => t != null && !t.IsAbstract && propType.IsAssignableFrom(t))
+				                         .Select(t => (type: t, attribute: GetAssetAttribute(t))).ToArray();
+				
+				s_cachedTypes[propType] = validTypes = candidates
+				                                       .Where(t => t.attribute != null)
+				                                       .ToArray();
 			}
 
 			if (validTypes.Length == 0)
@@ -315,9 +337,6 @@ namespace cratesmith.assetui
 				return false;
 			}
 
-			// var indentedPos = EditorGUI.IndentedRect(position);
-			// var buttonRect = new Rect(indentedPos.x - indentedPos.height, indentedPos.y, indentedPos.height,
-			// 	indentedPos.height);
 			if (ImageButton(position, NewButton, "Create Asset..."))
 			{
 				string filepathPrefix = property.serializedObject.isEditingMultipleObjects
@@ -325,9 +344,7 @@ namespace cratesmith.assetui
 					: GetLongestCommonPrefix(property.serializedObject.targetObjects
 					                                 .Select(x => Path.GetDirectoryName(GetPath(x))).ToArray());
 
-				GUIContent[] _options = validTypes.Select(x => (name: !string.IsNullOrEmpty(x.attribute.menuName)
-					                                                ? x.attribute.menuName.Substring(x.attribute.menuName.LastIndexOf('/') + 1)
-					                                                : x.type.Name, icon: EditorIconUtility.GetIcon(x.type)))
+				GUIContent[] _options = validTypes.Select(x => (name: GetAttributeDisplayName(x.type, x.attribute), icon: EditorIconUtility.GetIcon(x.type)))
 				                                  .Select(x => new GUIContent(x.name, x.icon))
 				                                  .ToArray();
 
@@ -342,16 +359,20 @@ namespace cratesmith.assetui
 				                                    index =>
 				                                    {
 					                                    SerializedProperty prop = callbackSO.FindProperty(callbackPropPath);
-					                                    (Type type, CreateAssetMenuAttribute attribute) typeData = validTypes[index];
+					                                    (Type type, Attribute attribute) typeData = validTypes[index];
 
-					                                    string defaultName = string.IsNullOrEmpty(typeData.attribute.fileName)
+					                                    var attribFilename = GetAttributeFileName(typeData.type, typeData.attribute);
+					                                    string defaultName = string.IsNullOrEmpty(attribFilename)
 						                                    ? Path.GetFileNameWithoutExtension(defaultOutputPath)
-						                                    : typeData.attribute.fileName;
+						                                    : attribFilename;
 
-					                                    string filePath = EditorUtility.SaveFilePanel($"Create {typeData.attribute.menuName}",
+					                                    var displayName = GetAttributeDisplayName(typeData.type, typeData.attribute);
+					                                    var extension = GetAttributeFileExtension(typeData.type, typeData.attribute);
+					                                    
+					                                    string filePath = EditorUtility.SaveFilePanel($"Create {displayName}",
 					                                                                                  $"{filepathPrefix}",
 					                                                                                  defaultName,
-					                                                                                  $"{typeData.type.Name}.asset");
+					                                                                                  extension);
 
 					                                    if (string.IsNullOrEmpty(filePath))
 					                                    {
