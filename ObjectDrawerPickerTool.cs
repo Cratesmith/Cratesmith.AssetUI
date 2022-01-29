@@ -100,7 +100,7 @@ namespace cratesmith.assetui
 			if (Event.current.type == EventType.MouseMove)
 			{
 				var filter = typeof(Component).IsAssignableFrom(m_PropType) 
-					? GameObject.FindObjectsOfType(m_PropType).Select(x=>((Component)x).gameObject).ToArray()
+					? GameObject.FindObjectsOfType(m_PropType).SelectMany(x=>((Component)x).GetComponentsInChildren<Transform>()).Select(x=>x.gameObject).ToArray()
 					: null;
 				if (!TryPickObject(Event.current.mousePosition, true, filter, out m_PickObj))
 				{
@@ -129,7 +129,7 @@ namespace cratesmith.assetui
 			var pickGO = HandleUtility.PickGameObject(position, selectPrefabRoot, null, filter);
 			return result = pickGO==null || !typeof(Component).IsAssignableFrom(m_PropType)
 				? pickGO
-				: (Object)pickGO.GetComponent(m_PropType);
+				: (Object)pickGO.GetComponentInParent(m_PropType);
 		}
 		
 		public static bool IsPickingFor(SerializedProperty property)
