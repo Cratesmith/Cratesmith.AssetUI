@@ -4,7 +4,7 @@ using UnityEditor;
 #endif
 using UnityEngine;
 
-namespace com.cratesmith.assetui
+namespace Cratesmith.AssetUI
 {
 	public interface INoLabelDrawer
 	{

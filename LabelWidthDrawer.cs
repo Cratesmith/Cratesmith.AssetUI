@@ -4,7 +4,7 @@ using UnityEditor;
 #endif
 using UnityEngine;
 
-namespace com.cratesmith.assetui
+namespace Cratesmith.AssetUI
 {
 	public class LabelWidthPropertyAttribute : PropertyAttribute
 	{
@@ -21,10 +21,12 @@ namespace com.cratesmith.assetui
 			this.minWidth = minWidth;
 		}
 
+#if UNITY_EDITOR
 		public float GetLabelWidth(Rect position, SerializedProperty property)
 		{
 			return Mathf.Min(maxWidth, property.depth*depthStep + widthScale*(position.width-minWidth) + minWidth);
 		}
+#endif
 	}
 	
 	#if UNITY_EDITOR

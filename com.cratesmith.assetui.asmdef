@@ -1,12 +1,8 @@
 {
     "name": "com.cratesmith.assetui",
     "rootNamespace": "",
-    "references": [
-        "GUID:15f1521d318773b46b6d205b3795a044"
-    ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "references": [],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": false,
