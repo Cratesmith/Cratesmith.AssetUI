@@ -4,6 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEditor.EditorTools;
+#if UNITY_2021_2_OR_NEWER
+using UnityEditor.SceneManagement;
+#else 
+using UnityEditor.Experimental.SceneManagement;
+#endif
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -100,8 +105,13 @@ namespace cratesmith.assetui
   
 			if (Event.current.type == EventType.MouseMove)
 			{
+				var prefabStage = PrefabStageUtility.GetCurrentPrefabStage();
 				var filter = typeof(Component).IsAssignableFrom(m_PropType) 
-					? GameObject.FindObjectsOfType(m_PropType).SelectMany(x=>((Component)x).GetComponentsInChildren<Transform>()).Select(x=>x.gameObject).ToArray()
+					? (prefabStage==null 
+						? GameObject.FindObjectsOfType(m_PropType)
+						: prefabStage.prefabContentsRoot.GetComponentsInChildren(m_PropType))
+					  .SelectMany(x=>((Component)x).GetComponentsInChildren<Component>())
+					  .Select(x=>x.gameObject).ToArray()
 					: null;
 				if (!TryPickObject(Event.current.mousePosition, true, filter, out m_PickObj))
 				{
