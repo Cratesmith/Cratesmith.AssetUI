@@ -34,7 +34,7 @@ namespace cratesmith.assetui
 				GUIDToAssetPath(
 					FindAssets("objectdrawer_new t:texture").FirstOrDefault()));
 
-		static Dictionary<Type, (Type type, Attribute attribute)[]> s_cachedTypes = new Dictionary<Type, (Type type, Attribute attribute)[]>();
+		static Dictionary<Type, (Type type, string displayName, string fileName, string fileExtension)[]> s_cachedTypes = new Dictionary<Type, (Type type, string displayName, string fileName, string fileExtension)[]>();
 
 		public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
 		{
@@ -122,11 +122,11 @@ namespace cratesmith.assetui
 				propertyFieldRect.xMax -= singleButtonWidth;
 			}	
 			
-			// Draw "Create" for scriptable objects
+			// Draw "Create" for supported assets
 			if (property.propertyType == SerializedPropertyType.ObjectReference)
 			{
 				Rect createBtnRect = new Rect(propertyFieldRect.xMax - singleButtonWidth, position.y, singleButtonWidth, EditorGUIUtility.singleLineHeight);
-				if (DrawCreateScriptableObject(createBtnRect, property, popupWindowRect))
+				if (DrawCreateAsset(createBtnRect, property, popupWindowRect))
 				{
 					propertyFieldRect.xMax -= singleButtonWidth;
 				}
@@ -256,7 +256,19 @@ namespace cratesmith.assetui
 		static Type AssetFileNameExtensionAttributeType => s_AssetFileNameExtensionAttributeType = s_AssetFileNameExtensionAttributeType ?? AllTypes.Where(x => x.Name == "AssetFileNameExtensionAttribute").First();
 		static PropertyInfo s_AssetFileNameExtensionAttributePreferredInfoPI;
 		static PropertyInfo AssetFileNameExtensionAttributePreferredInfoPI => s_AssetFileNameExtensionAttributePreferredInfoPI = s_AssetFileNameExtensionAttributePreferredInfoPI ?? AssetFileNameExtensionAttributeType.GetProperty("preferredExtension");
-		
+
+
+		private static bool CanCreateAssetType(Type t)
+		{
+			if (t == null)
+				return false;
+			
+			if (typeof(ScriptableObject).IsAssignableFrom(t))
+			{
+				return GetAssetAttribute(t) != null;
+			}
+			return typeof(GameObject).IsAssignableFrom(t) || typeof(Component).IsAssignableFrom(t);
+		}
 		
 		private static Attribute GetAssetAttribute(Type t)
 		{
@@ -279,62 +291,85 @@ namespace cratesmith.assetui
 			return null;
 		}
 		
-		private static string GetAttributeDisplayName(Type type, Attribute attribute)
+		private static string GetAssetDisplayName(Type type)
 		{
-			if (attribute is CreateAssetMenuAttribute caa)
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
 			{
-				return !string.IsNullOrEmpty(caa.menuName)
-					? caa.menuName.Substring(caa.menuName.LastIndexOf('/') + 1)
-					: type.Name;
+				var attribute = GetAssetAttribute(type);
+				if (attribute is CreateAssetMenuAttribute caa)
+				{
+					return !string.IsNullOrEmpty(caa.menuName)
+						? caa.menuName.Substring(caa.menuName.LastIndexOf('/') + 1)
+						: type.Name;
+				} else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+				{
+					return type.Name;
+				}
+
+				throw new ArgumentException("Unkown attribute type");
 			}
-			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
-			{
-				return type.Name;
-			}
-			throw new ArgumentException("Unkown attribute type");
+
+			return type.Name;
 		}
 
-		private static string GetAttributeFileName(Type type, Attribute attribute)
+		private static string GetAssetFileName(Type type)
 		{
-			if (attribute is CreateAssetMenuAttribute caa)
-				return caa.fileName;
-			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
 			{
-				return null;
+				var attribute = GetAssetAttribute(type);
+				if (attribute is CreateAssetMenuAttribute caa)
+					return caa.fileName;
+				else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+				{
+					return null;
+				}
+
+				throw new ArgumentException("Unkown attribute type");
+			}
+			
+			return null;
+		}
+
+		private static string GetAssetFileExtension(Type type)
+		{
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
+			{
+				var attribute = GetAssetAttribute(type);
+
+				if (attribute is CreateAssetMenuAttribute caa)
+					return $"{type.Name}.asset";
+				else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+				{
+					return (string)AssetFileNameExtensionAttributePreferredInfoPI.GetValue(attribute);
+				}
+
+				throw new ArgumentException("Unkown attribute type");
 			}
 
-			throw new ArgumentException("Unkown attribute type");
+			
+			if (typeof(GameObject).IsAssignableFrom(type))
+				return "prefab";
+			else if(typeof(Component).IsAssignableFrom(type))
+				return $"{type.Name}.prefab";
+
+			return null;
 		}
 		
-		private static string GetAttributeFileExtension(Type type, Attribute attribute)
-		{
-			if (attribute is CreateAssetMenuAttribute caa)
-				return $"{type.Name}.asset";
-			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
-			{
-				return (string)AssetFileNameExtensionAttributePreferredInfoPI.GetValue(attribute);
-			}
-
-			throw new ArgumentException("Unkown attribute type");
-		}
-		
-		static bool DrawCreateScriptableObject(Rect position, SerializedProperty property, Rect popupWindowRect)
+		static bool DrawCreateAsset(Rect position, SerializedProperty property, Rect popupWindowRect)
 		{
 			Type propType = property.GetSerializedPropertyType();
-
-			if (propType == null || !typeof(ScriptableObject).IsAssignableFrom(propType))
+			if (propType == null)
 			{
 				return false;
 			}
 
-			if (!s_cachedTypes.TryGetValue(propType, out (Type type, Attribute attribute)[] validTypes))
+			if (!s_cachedTypes.TryGetValue(propType, out (Type type, string displayName, string fileName, string fileExtension)[] validTypes))
 			{
 				var candidates = AllTypes.Where(t => t != null && !t.IsAbstract && propType.IsAssignableFrom(t))
-				                         .Select(t => (type: t, attribute: GetAssetAttribute(t))).ToArray();
+				                         .Where(t=>CanCreateAssetType(t))
+				                         .Select(t => (type: t, menuName:GetAssetDisplayName(t), fileName: GetAssetFileName(t), extension:GetAssetFileExtension(t))).ToArray();
 				
-				s_cachedTypes[propType] = validTypes = candidates
-				                                       .Where(t => t.attribute != null)
-				                                       .ToArray();
+				s_cachedTypes[propType] = validTypes = candidates.ToArray();
 			}
 
 			if (validTypes.Length == 0)
@@ -349,7 +384,7 @@ namespace cratesmith.assetui
 					: GetLongestCommonPrefix(property.serializedObject.targetObjects
 					                                 .Select(x => Path.GetDirectoryName(GetPath(x))).ToArray());
 
-				GUIContent[] _options = validTypes.Select(x => (name: GetAttributeDisplayName(x.type, x.attribute), icon: EditorIconUtility.GetIcon(x.type)))
+				GUIContent[] _options = validTypes.Select(x => (name: x.displayName, icon: EditorIconUtility.GetIcon(x.type)))
 				                                  .Select(x => new GUIContent(x.name, x.icon))
 				                                  .ToArray();
 
@@ -360,21 +395,19 @@ namespace cratesmith.assetui
 
 				Texture2D icon = EditorIconUtility.GetIcon(propType);
 
-				CreateScriptableObjectWindow.Create($"Create {propType.Name}",
+				OptionPopupWindow.Create($"Create {propType.Name}",
 				                                    index =>
 				                                    {
 					                                    SerializedProperty prop = callbackSO.FindProperty(callbackPropPath);
-					                                    (Type type, Attribute attribute) typeData = validTypes[index];
+					                                    (Type type, string displayName, string fileName, string fileExtension) typeData = validTypes[index];
 
-					                                    var attribFilename = GetAttributeFileName(typeData.type, typeData.attribute);
-					                                    string defaultName = string.IsNullOrEmpty(attribFilename)
+					                                    string defaultName = string.IsNullOrEmpty(typeData.fileName)
 						                                    ? Path.GetFileNameWithoutExtension(defaultOutputPath)
-						                                    : attribFilename;
+						                                    : typeData.fileName;
 
-					                                    var displayName = GetAttributeDisplayName(typeData.type, typeData.attribute);
-					                                    var extension = GetAttributeFileExtension(typeData.type, typeData.attribute);
+					                                    var extension = typeData.fileExtension;
 					                                    
-					                                    string filePath = EditorUtility.SaveFilePanel($"Create {displayName}",
+					                                    string filePath = EditorUtility.SaveFilePanel($"Create {typeData.displayName}",
 					                                                                                  $"{filepathPrefix}",
 					                                                                                  defaultName,
 					                                                                                  extension);
@@ -386,12 +419,11 @@ namespace cratesmith.assetui
 
 					                                    filePath = GetRelativePath(Directory.GetParent(Application.dataPath).FullName + Path.DirectorySeparatorChar, filePath);
 
-					                                    ScriptableObject instance = ScriptableObject.CreateInstance(validTypes[index].type);
-					                                    CreateAsset(instance, filePath);
+					                                    var (asset, instance)  = CreateAssetOfType(validTypes[index].type, filePath);
 					                                    EditorGUIUtility.PingObject(instance);
 					                                    prop.objectReferenceValue = instance;
 					                                    prop.serializedObject.ApplyModifiedProperties();
-					                                    PopupEditorWindow.Create(prop.objectReferenceValue, popupWindowRect);
+					                                    //PopupEditorWindow.Create(prop.objectReferenceValue, popupWindowRect);
 				                                    },
 				                                    _options,
 				                                    defaultOutputPath,
@@ -399,6 +431,34 @@ namespace cratesmith.assetui
 			}
 
 			return true;
+		}
+		static (Object asset, Object instance) CreateAssetOfType(Type type, string filePath)
+		{
+			Object asset = null;
+			Object instance = null;
+
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
+			{
+				asset = instance = ScriptableObject.CreateInstance(type);
+				CreateAsset(asset, filePath);
+			}
+			else if (typeof(Component).IsAssignableFrom(type))
+			{
+				var go = new GameObject(Path.GetFileNameWithoutExtension(filePath),new []{type});
+				var goAsset = PrefabUtility.SaveAsPrefabAsset(go, filePath);
+				Object.DestroyImmediate(go);
+				instance = goAsset.GetComponent(type);
+				asset = goAsset;
+					
+			} else if (typeof(GameObject).IsAssignableFrom(type))
+			{
+				var go = new GameObject(Path.GetFileNameWithoutExtension(filePath));
+				var goAsset = PrefabUtility.SaveAsPrefabAsset(go, filePath);
+				Object.DestroyImmediate(go);
+				asset = instance = goAsset;
+			}
+
+			return (asset, instance);
 		}
 
 		static bool ImageButton(Rect position, Texture2D buttonImg, string tooltip)
