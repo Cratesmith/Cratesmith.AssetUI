@@ -1,16 +1,19 @@
 ﻿#if UNITY_EDITOR
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 namespace cratesmith.assetui
 {
 	public class PopupEditorWindow : EditorWindow
 	{
-		[SerializeField] private Editor m_editor;
-		[SerializeField] private List<Editor> m_subEditors = new List<Editor>();
-		[SerializeField] private Vector2 m_scrollPosition = Vector2.zero;
-		[SerializeField] private Object m_target;
+		[SerializeField] private Editor       m_editor;
+		[SerializeField] private List<Editor> m_subEditors     = new List<Editor>();
+		[SerializeField] private Vector2      m_scrollPosition = Vector2.zero;
+		[SerializeField] private Object       m_target;
+		[SerializeField]         bool         m_Pinned;
 
 		private const string MENUITEM_WINDOW_STRING = "Window/Create Popup Inspector...";
 		private const string MENUITEM_ASSETS_STRING = "Assets/View in Popup Inspector...";
@@ -107,9 +110,25 @@ namespace cratesmith.assetui
 			{
 				OnGUI_DrawEditor(editor, false, true);
 			}
+
+			if (docked)
+				m_Pinned = true;
+			else
+				m_Pinned = GUI.Toggle(new Rect(46, 28, 75, 18), m_Pinned, "Keep Open","button");
+			
+			if (!m_Pinned && Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
+			{
+				Close();
+			}
+			
 			GUILayout.EndScrollView();
 		}
 
+		void OnLostFocus()
+		{
+			if(!m_Pinned)
+				Close();
+		}
 
 		private void OnGUI_DrawEditor(Editor editor, bool drawHeader, bool isExpandable)
 		{

@@ -35,8 +35,7 @@ namespace cratesmith.assetui
 
         public static void Create(string title, 
             UnityAction<int> action, 
-            GUIContent[] options, 
-            string defaultValue = "", 
+            GUIContent[] options,
             Texture icon=null)
         {
             var wnd = CreateInstance<OptionPopupWindow>();
@@ -46,7 +45,7 @@ namespace cratesmith.assetui
             wnd.icon = icon;
             wnd.initalized = false;
             wnd.minSize = wnd.maxSize = new Vector2(320, Mathf.Min(320, options.Length*25f + 70f));
-            wnd.ShowAsDropDown(Rect.zero, wnd.minSize);
+            wnd.ShowPopup();
             wnd.updateCount = 0;
             wnd.options = options;
             wnd.scrollPosition = Vector2.zero;
@@ -176,7 +175,7 @@ namespace cratesmith.assetui
                     GUILayout.Space(5);
 
                     if (GUILayout.Button("Ok", GUILayout.Width(60))
-                        || Event.current.keyCode == KeyCode.Return)
+                        || (Event.current.keyCode == KeyCode.Return))
                     {
                         confirmed = true;
                     }
