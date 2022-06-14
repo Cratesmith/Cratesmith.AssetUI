@@ -180,7 +180,10 @@ namespace cratesmith.assetui
 			}
 			else
 			{
-				DoProjectAssetPick(position, property, propType);
+				if (ImageButton(buttonRect, ObjectDrawerPickerTool.PickerIcon, "Pick from project"))
+				{
+					DoProjectAssetPick(position, property, propType);
+				}
 			}
 			
 			if (!wasScenePicking && isScenePicking)
