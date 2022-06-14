@@ -212,8 +212,7 @@ namespace cratesmith.assetui
 
 				if (validScripts.Count > 0)
 				{
-					var validScriptPathsSet = validScripts.Keys
-					                                      .ToHashSet();
+					var validScriptPathsSet = new HashSet<string>(validScripts.Keys);
 
 					EditorUtility.DisplayProgressBar("Prefab lookup search", "Should just take a second", 0.5f);
 					validAssets = AssetDatabase.FindAssets("t:prefab")
