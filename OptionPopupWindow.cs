@@ -44,7 +44,7 @@ namespace cratesmith.assetui
             wnd.action.AddListener(action);
             wnd.icon = icon;
             wnd.initalized = false;
-            wnd.minSize = wnd.maxSize = new Vector2(320, Mathf.Min(320, options.Length*25f + 70f));
+            wnd.minSize = wnd.maxSize = new Vector2(320, Mathf.Min(320, options.Length*25f + 80f));
             wnd.ShowPopup();
             wnd.updateCount = 0;
             wnd.options = options;
@@ -143,7 +143,7 @@ namespace cratesmith.assetui
                             i == selectedIndex 
                                 ? Color.blue
                                 : (i%2==0 ? s_EvenColor : s_OddColor); 
-                        if (GUILayout.Button(shownOptions[i], s_ButtonStyle,GUILayout.Height(20), GUILayout.Width(Screen.width-20)))
+                        if (GUILayout.Button(shownOptions[i], s_ButtonStyle,GUILayout.Height(20)))
                         {
                             selectedIndex = i;
                             confirmed = true;
