@@ -91,8 +91,25 @@ namespace cratesmith.assetui
 			                          .Concat(AssetDatabase.FindAssets(filter).Select(AssetDatabase.GUIDToAssetPath).Select(x => ((Object)null, Path.GetFileName(x), x))).ToArray();
 
 			OptionPopupWindow.Create(title,
-			                         id => Popup(options[id].Item1 ? options[id].Item1 : AssetDatabase.LoadMainAssetAtPath(options[id].Item3)),
-			                         options.Select(x => new GUIContent($"{x.Item2}", x.Item1 ? EditorIconUtility.GetIcon(x.Item1) : AssetDatabase.GetCachedIcon(x.Item3))).ToArray());
+			                         id =>
+			                         {
+				                         var obj = options[id].Item1 
+					                         ? options[id].Item1 
+					                         : AssetDatabase.LoadMainAssetAtPath(options[id].Item3);
+				                         Popup(obj);
+
+				                         if (Event.current.control || Event.current.shift)
+				                         {
+					                         EditorGUIUtility.PingObject(obj);
+				                         }
+
+				                         if (Event.current.control)
+				                         {
+					                         Selection.activeObject = obj;
+				                         }
+			                         },
+			                         options.Select(x => new GUIContent($"{x.Item2}", x.Item1 ? EditorIconUtility.GetIcon(x.Item1) : AssetDatabase.GetCachedIcon(x.Item3))).ToArray(), 
+			                         extraText:"+ctrl: select, +shift:highlight");
 		}
 
 		static void GameObjectPopup(GameObject gameObject)

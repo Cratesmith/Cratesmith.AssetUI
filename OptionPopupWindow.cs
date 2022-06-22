@@ -11,22 +11,23 @@ namespace cratesmith.assetui
     {
         [Serializable] public class OnDoneAction : UnityEvent<int> {} 
     
-        [SerializeField] GUIContent[]                        options;
-        [SerializeField] private string                      value;
-        [SerializeField] private OnDoneAction                action = new OnDoneAction();
-        [SerializeField] private GUIContent                  titleText;
-        [SerializeField] private bool                        initalized;
-        [SerializeField] private int                         updateCount;
-        [SerializeField] private Texture                     icon;
-        [SerializeField] int                                 selectedIndex;
-        [SerializeField] Vector2                             scrollPosition;
-        [SerializeField] GUIContent[]                        shownOptions;
-        [SerializeField] int[]                               optionIds;
-        [SerializeField] bool scrollTo;  
+        [SerializeField]         GUIContent[] options;
+        [SerializeField] private string       value;
+        [SerializeField] private OnDoneAction action = new OnDoneAction();
+        [SerializeField] private GUIContent   titleText;
+        [SerializeField] private bool         initalized;
+        [SerializeField] private int          updateCount;
+        [SerializeField] private Texture      icon;
+        [SerializeField]         int          selectedIndex;
+        [SerializeField]         Vector2      scrollPosition;
+        [SerializeField]         GUIContent[] shownOptions;
+        [SerializeField]         int[]        optionIds;
+        [SerializeField]         bool         scrollTo;  
+        [SerializeField]         string       extraText;
     
-        static readonly Color s_EvenColor = Color.white;
-        static readonly Color s_OddColor = new Color(0.75f, 0.75f, 0.75f, 1f);
-        static GUIStyle s_ButtonStyle;
+        static readonly Color    s_EvenColor = Color.white;
+        static readonly Color    s_OddColor  = new Color(0.75f, 0.75f, 0.75f, 1f);
+        static          GUIStyle s_ButtonStyle;
 
         void OnLostFocus()
         {
@@ -36,7 +37,8 @@ namespace cratesmith.assetui
         public static void Create(string title, 
             UnityAction<int> action, 
             GUIContent[] options,
-            Texture icon=null)
+            Texture icon=null,
+            string extraText="")
         {
             var wnd = CreateInstance<OptionPopupWindow>();
             wnd.titleText = new GUIContent(title);
@@ -50,6 +52,7 @@ namespace cratesmith.assetui
             wnd.options = options;
             wnd.scrollPosition = Vector2.zero;
             wnd.scrollTo = false;
+            wnd.extraText = extraText;
         }
 
         void OnGUI()
@@ -164,6 +167,7 @@ namespace cratesmith.assetui
             
                 using (new EditorGUILayout.HorizontalScope())
                 {
+                    GUILayout.Label(extraText);
                     GUILayout.FlexibleSpace();
 
                     if (GUILayout.Button("Cancel", GUILayout.Width(60))
@@ -188,7 +192,7 @@ namespace cratesmith.assetui
                 {
                     Close();
                 }
-                else if (confirmed)
+                else if (confirmed && selectedIndex>=0 && selectedIndex < optionIds.Length)
                 {
                     action.Invoke(optionIds[selectedIndex]);
                     Close();
