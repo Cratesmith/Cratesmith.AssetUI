@@ -161,7 +161,7 @@ namespace cratesmith.assetui
 			{
 				var options = new []
 				{
-					"Pick from scene...",
+					"Eyedrop from scene...",
 					"Pick from project assets..."
 				};
 
