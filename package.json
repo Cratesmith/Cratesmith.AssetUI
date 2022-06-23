@@ -5,6 +5,8 @@
 	"version": "0.0.4",
 	"unity": "2021.1",
 	"license": "MIT",
+	"documentationUrl": "https://github.com/Cratesmith/Cratesmith.AssetUI",
+	"licensesUrl": "https://github.com/Cratesmith/Cratesmith.AssetUI/blob/main/LICENSE",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/Cratesmith/Cratesmith.AssetUI.git"
