@@ -1,58 +1,149 @@
 ﻿#if UNITY_EDITOR
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using Object = UnityEngine.Object;
+using static UnityEditor.AssetDatabase;
 
 namespace cratesmith.assetui
 {
 	public class PopupEditorWindow : EditorWindow
 	{
-		[SerializeField] private Editor m_editor;
-		[SerializeField] private List<Editor> m_subEditors = new List<Editor>();
-		[SerializeField] private Vector2 m_scrollPosition = Vector2.zero;
-		[SerializeField] private Object m_target;
+		private Editor       m_editor;
+		private List<Editor> m_subEditors     = new List<Editor>();
+		[SerializeField] private Vector2      m_scrollPosition = Vector2.zero;
+		[SerializeField] private Object       m_target;
+		[SerializeField]         bool         m_Pinned;
 
-		private const string MENUITEM_WINDOW_STRING = "Window/Create Popup Inspector...";
-		private const string MENUITEM_ASSETS_STRING = "Assets/View in Popup Inspector...";
-		private const string MENUITEM_CONTEXT_STRING = "CONTEXT/Object/View in Popup Inspector...";
-
+		static Texture2D s_PinButton;
+		static Texture2D PinButton => s_PinButton
+			? s_PinButton
+			: s_PinButton = LoadAssetAtPath<Texture2D>(
+				GUIDToAssetPath(
+					FindAssets("popout_pin t:texture").FirstOrDefault()));
+		
+		private const string MENUITEM_WINDOW_STRING  = "Window/View in Popup Inspector... &\\";
+		private const string MENUITEM_PREFABS_STRING = "Window/Go to in scene and prefabs... ^t";
+		private const string MENUITEM_ASSETS_STRING  = "Window/Go to in scriptable objects... &t";
+		private const string MENUITEM_ALLASSETS_STRING  = "Window/Go to in all assets... ^#t";
+		
 		[MenuItem(MENUITEM_WINDOW_STRING, true)]
-		[MenuItem(MENUITEM_ASSETS_STRING, true)]
 		public static bool _PopupEditorWindowMenuItem()
 		{
 			return Selection.activeObject != null;
 		}
-
-		[MenuItem(MENUITEM_CONTEXT_STRING)]
-		public static void PopupEditorWindowMenuItem(MenuCommand command)
-		{
-			Create(command.context, new Rect(50, 50, 600, 500));
-		}
-
+		
 		[MenuItem(MENUITEM_WINDOW_STRING)]
-		[MenuItem(MENUITEM_ASSETS_STRING)]
 		public static void PopupEditorWindowMenuItem()
 		{
-			Create(Selection.activeObject, new Rect(50, 50, 600, 500));
+			Popup(Selection.activeObject);
 		}
 
-		public static void DrawPopOutButton(Rect position, Object popoutReference)
+		static void Popup(Object obj)
 		{
-			if (popoutReference != null)
+			if (obj is GameObject gameObject)
 			{
-				var wasEnabled = GUI.enabled;
-				GUI.enabled = true;
-				var indentedPos = EditorGUI.IndentedRect(position);
-				var buttonRect = new Rect(indentedPos.x - indentedPos.height, indentedPos.y, indentedPos.height, indentedPos.height);
-				if (GUI.Button(buttonRect, "", "OL Plus"))
-				{
-					var windowRect = new Rect(GUIUtility.GUIToScreenPoint(position.position), new Vector2(400, 500));
-					PopupEditorWindow.Create(popoutReference, windowRect);
-				}
-				GUI.enabled = wasEnabled;
-			}
+				GameObjectPopup(gameObject);
+			} else if (obj)
+				Create(obj,GUIUtility.GUIToScreenPoint(Event.current.mousePosition), new Vector2(600, 500));
 		}
 
+		[MenuItem(MENUITEM_PREFABS_STRING)]
+		public static void PopupEditorWindowMenuItemPrefabs()
+		{
+			var title = "Go to gameobject or prefab";
+			var extraObjects = new List<Object>();
+			for (int i = 0; i < EditorSceneManager.sceneCount; i++)
+			{
+				var roots = EditorSceneManager.GetSceneAt(i).GetRootGameObjects();
+
+				extraObjects.AddRange(roots.SelectMany(x => x.GetComponentsInChildren<Transform>()
+				                                             .Select(x => x.gameObject)
+				                                             .Where(x => !PrefabUtility.IsPartOfPrefabInstance(x) || PrefabUtility.IsOutermostPrefabInstanceRoot(x))));
+			}
+			
+			AssetPopup("t:prefab", title,extraObjects);
+		}
+		
+		[MenuItem(MENUITEM_ASSETS_STRING)]
+		public static void PopupEditorWindowMenuItemAssets()
+		{
+			AssetPopup("t:ScriptableObject", "Go to ScriptableObject asset");
+		}
+		
+		
+		[MenuItem(MENUITEM_ALLASSETS_STRING)]
+		public static void PopupEditorWindowMenuItemAllAssets()
+		{
+			AssetPopup("t:ScriptableObject t:prefab", "Go to asset");
+		}
+		
+		static void AssetPopup(string filter, string title, List<Object> extraObjects=null)
+		{
+			if (extraObjects == null)
+				extraObjects = new List<Object>();
+
+			var options = extraObjects.Select(x => (x, x.name, ""))
+			                          .Concat(AssetDatabase.FindAssets(filter).Select(AssetDatabase.GUIDToAssetPath).Select(x => ((Object)null, Path.GetFileName(x), x))).ToArray();
+
+			OptionPopupWindow.Create(title,
+			                         id =>
+			                         {
+				                         var obj = options[id].Item1 
+					                         ? options[id].Item1 
+					                         : AssetDatabase.LoadMainAssetAtPath(options[id].Item3);
+				                         Popup(obj);
+
+				                         if (Event.current.control || Event.current.shift)
+				                         {
+					                         EditorGUIUtility.PingObject(obj);
+				                         }
+
+				                         if (Event.current.control)
+				                         {
+					                         Selection.activeObject = obj;
+				                         }
+			                         },
+			                         options.Select(x => new GUIContent($"{x.Item2}", x.Item1 ? EditorIconUtility.GetIcon(x.Item1) : AssetDatabase.GetCachedIcon(x.Item3))).ToArray(), 
+			                         extraText:"+ctrl: select, +shift:highlight");
+		}
+
+		static void GameObjectPopup(GameObject gameObject)
+		{
+			if (!gameObject)
+				return;
+		
+			var options = gameObject.GetComponentsInChildren<Transform>().Select(x => x.gameObject)
+			                        .SelectMany(x => new Object[]
+			                        {
+				                        x
+			                        }.Concat(x.GetComponentsInChildren<Component>()))
+			                        .ToArray();
+
+			OptionPopupWindow.Create("Select Component/GameObject",
+			                         id => Create(options[id], GUIUtility.GUIToScreenPoint(Event.current.mousePosition), new Vector2(600, 500)),
+			                         options.Select(x => new GUIContent($"{x.GetType().Name} ({x.name})", EditorIconUtility.GetIcon(x))).ToArray());
+		}
+
+		static bool ImageToggle(Rect position, Texture2D buttonImg, bool value, string tooltip)
+		{
+			bool result = GUI.Toggle(position, value, new GUIContent("",tooltip), "Button");
+			Vector2 imgSize = new Vector2(buttonImg.width, buttonImg.height);
+			Rect imgRect = new Rect(position.center - imgSize / 2f, imgSize);
+
+			Color prevColor = GUI.color;
+			GUI.color = EditorGUIUtility.isProSkin ? Color.white : Color.gray;
+			GUI.DrawTexture(imgRect, buttonImg);
+			GUI.color = prevColor;
+			return result;
+		}
+
+		public static PopupEditorWindow Create(Object obj, Vector2 position, Vector2 size) => Create(obj, new Rect(position - Vector2.right * (size.x * .5f), size));
+		
 		public static PopupEditorWindow Create(Object obj, Rect rect)
 		{
 			var window = CreateInstance<PopupEditorWindow>();
@@ -70,6 +161,7 @@ namespace cratesmith.assetui
 		{
 			m_target = obj;
 			m_editor = Editor.CreateEditor(m_target);
+			m_subEditors.Clear();
 
 			var gameObject = m_target as GameObject;
 			if (gameObject)
@@ -88,10 +180,22 @@ namespace cratesmith.assetui
 
 		void OnEnable()
 		{
-			if (m_target && m_editor == null)
+			if (m_target)
 			{
 				Init(m_target);
 			}		
+		}
+
+		void Update()
+		{
+			if (EditorWindow.focusedWindow != null 
+			    && focusedWindow!=this 
+			    && !(focusedWindow.GetType().Name == "ObjectSelector")
+				&& !(focusedWindow is OptionPopupWindow)
+			    && !m_Pinned)
+			{
+				Close();
+			}
 		}
 
 		void OnGUI()
@@ -107,9 +211,19 @@ namespace cratesmith.assetui
 			{
 				OnGUI_DrawEditor(editor, false, true);
 			}
+
+			if (docked)
+				m_Pinned = true;
+			else
+				m_Pinned = ImageToggle(new Rect(4, 33, 18, 18), PinButton, m_Pinned,"Keep Open");
+			
+			if (!m_Pinned && Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Escape)
+			{
+				Close();
+			}
+			
 			GUILayout.EndScrollView();
 		}
-
 
 		private void OnGUI_DrawEditor(Editor editor, bool drawHeader, bool isExpandable)
 		{

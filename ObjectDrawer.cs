@@ -1,16 +1,17 @@
 #if UNITY_EDITOR
+#if UNITY_2021_2_OR_NEWER
+using UnityEditor.SceneManagement;
+#else 
+using UnityEditor.Experimental.SceneManagement;
+#endif
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
-#if UNITY_2021_2_OR_NEWER
-using UnityEditor.SceneManagement;
-#else 
-using UnityEditor.Experimental.SceneManagement;
-#endif
 using UnityEngine;
+using UnityEngine.Assertions;
 using static UnityEditor.AssetDatabase;
 using Object = UnityEngine.Object;
 
@@ -19,8 +20,9 @@ namespace cratesmith.assetui
 	[CustomPropertyDrawer(typeof(Object), true)]
 	public class ObjectDrawer : PropertyDrawer
 	{
-		static Texture2D                                     s_ExpandButton;
-		static Texture2D                                     s_NewButton;
+		static Texture2D                 s_ExpandButton;
+		static Texture2D                 s_NewButton;
+		static HashSet<ScriptableObject> s_CyclicCheck = new HashSet<ScriptableObject>();
 
 		static Texture2D ExpandButton => s_ExpandButton
 			? s_ExpandButton
@@ -34,7 +36,7 @@ namespace cratesmith.assetui
 				GUIDToAssetPath(
 					FindAssets("objectdrawer_new t:texture").FirstOrDefault()));
 
-		static Dictionary<Type, (Type type, Attribute attribute)[]> s_cachedTypes = new Dictionary<Type, (Type type, Attribute attribute)[]>();
+		static Dictionary<Type, (Type type, string displayName, string fileName, string fileExtension)[]> s_cachedTypes = new Dictionary<Type, (Type type, string displayName, string fileName, string fileExtension)[]>();
 
 		public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
 		{
@@ -68,8 +70,10 @@ namespace cratesmith.assetui
 		
 		public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
 		{
-			PropertyField(position, property, label);
-		}
+            s_CyclicCheck.Clear();
+            PropertyField(position, property, label);
+            s_CyclicCheck.Clear();
+        }
 
 		public static void ObjectField(Rect position, SerializedProperty property, Type objType, GUIContent label)
 		{
@@ -100,33 +104,22 @@ namespace cratesmith.assetui
 		}
 		static Rect PropertyFieldRight(Rect position, SerializedProperty property)
 		{
-			Rect popupWindowRect = new Rect(GUIUtility.GUIToScreenPoint(position.position - Vector2.right * 416),
-			                                new Vector2(400, 500));
-
+			Rect popupWindowRect = new Rect(EditorGUIUtility.GUIToScreenPoint(new Vector2(position.xMin,position.yMin+EditorGUIUtility.singleLineHeight)),
+			                                new Vector2(position.width, 500));
+			
 			int singleButtonWidth = 20;
 			Rect propertyFieldRect = position;
-			
-			// Draw "Picker tool"
-			if (ObjectDrawerPickerTool.CanPickProperty(property))
+
+			if (DrawPickAsset(position, property, propertyFieldRect, singleButtonWidth))
 			{
-				Rect buttonRect = new Rect(propertyFieldRect.xMax-singleButtonWidth, position.y, singleButtonWidth, EditorGUIUtility.singleLineHeight);
-				var wasPicking = ObjectDrawerPickerTool.IsPickingFor(property);
-				var isPicking = ImageToggle(buttonRect, ObjectDrawerPickerTool.PickerIcon, wasPicking, "Pick from scene"); 
-				if (!wasPicking && isPicking)
-				{
-					ObjectDrawerPickerTool.DoPicker(property);
-				} else if(!isPicking && wasPicking)
-				{
-					ObjectDrawerPickerTool.Cancel();
-				}
 				propertyFieldRect.xMax -= singleButtonWidth;
-			}	
+			}
 			
-			// Draw "Create" for scriptable objects
+			// Draw "Create" for supported assets
 			if (property.propertyType == SerializedPropertyType.ObjectReference)
 			{
 				Rect createBtnRect = new Rect(propertyFieldRect.xMax - singleButtonWidth, position.y, singleButtonWidth, EditorGUIUtility.singleLineHeight);
-				if (DrawCreateScriptableObject(createBtnRect, property, popupWindowRect))
+				if (DrawCreateAsset(createBtnRect, property, popupWindowRect))
 				{
 					propertyFieldRect.xMax -= singleButtonWidth;
 				}
@@ -145,6 +138,155 @@ namespace cratesmith.assetui
 
 			return propertyFieldRect;
 		}
+		
+		static bool DrawPickAsset(Rect position, SerializedProperty property, Rect propertyFieldRect, int singleButtonWidth)
+		{
+			Type propType = property.GetSerializedPropertyType();
+			var canScenePick = ObjectDrawerPickerTool.CanPickProperty(property);
+			var canAssetPick = typeof(GameObject).IsAssignableFrom(propType) || typeof(Component).IsAssignableFrom(propType);
+			Rect buttonRect = new Rect(propertyFieldRect.xMax - singleButtonWidth, position.y, singleButtonWidth, EditorGUIUtility.singleLineHeight);
+
+			var wasScenePicking = ObjectDrawerPickerTool.IsPickingFor(property);
+			var isScenePicking = false;
+
+			if (!canScenePick && !canAssetPick)
+				return false;
+			
+			// Draw "Picker tool"
+			if (canScenePick && (!canAssetPick||wasScenePicking))
+			{
+				isScenePicking = ImageToggle(buttonRect, ObjectDrawerPickerTool.PickerIcon, wasScenePicking, "Pick from scene");
+			}
+			else if (canAssetPick && canScenePick)
+			{
+				var options = new []
+				{
+					"Eyedrop from scene...",
+					"Pick from project assets..."
+				};
+
+				var result = ImagePopup(buttonRect, ObjectDrawerPickerTool.PickerIcon, "Pick from scene/project", options);
+
+				switch (result)
+				{
+					case 0: 
+						isScenePicking = true;
+						break;
+					
+					case 1:
+						DoProjectAssetPick(position, property, propType);
+						break;				
+				}
+			}
+			else
+			{
+				if (ImageButton(buttonRect, ObjectDrawerPickerTool.PickerIcon, "Pick from project"))
+				{
+					DoProjectAssetPick(position, property, propType);
+				}
+			}
+			
+			if (!wasScenePicking && isScenePicking)
+			{
+				ObjectDrawerPickerTool.DoPicker(property);
+			} else if (!isScenePicking && wasScenePicking)
+			{
+				ObjectDrawerPickerTool.Cancel(); 
+			}
+
+			return true;
+		}
+		
+		static void DoProjectAssetPick(Rect position, SerializedProperty property, Type propType)
+		{
+			(string path, Type type)[] validAssets;
+
+			if (typeof(Component).IsAssignableFrom(propType))
+			{
+				if (s_CachedScripts == null)
+					s_CachedScripts = MonoImporter.GetAllRuntimeMonoScripts();
+
+				var validScripts = s_CachedScripts
+				                   .Where(x => x && propType.IsAssignableFrom(x.GetClass()))
+				                   .ToDictionary(AssetDatabase.GetAssetPath);
+
+				if (validScripts.Count > 0)
+				{
+					var validScriptPathsSet = new HashSet<string>(validScripts.Keys);
+					var allPrefabs = AssetDatabase.FindAssets("t:prefab")
+					                              .Select(AssetDatabase.GUIDToAssetPath)
+					                              .Select(x=>(path:x, dependencies:AssetDatabase.GetDependencies(x,false).ToHashSet()))
+					                              .ToArray();
+					
+					EditorUtility.DisplayProgressBar("Prefab lookup search", "Quick search. Won't find built in types. Will be faster on repeat uses", 0.5f);
+
+					var basePrefabsSet = allPrefabs.Where(x => validScriptPathsSet.Overlaps(x.dependencies))
+					                               .Select(x=>x.path)
+					                                .ToHashSet();
+
+					while(true)
+					{
+						var newVariants = allPrefabs.Where(x => x.dependencies.Overlaps(basePrefabsSet) && !basePrefabsSet.Contains(x.path))
+						                            .Select(x => (path: x.path, obj: AssetDatabase.LoadAssetAtPath<GameObject>(x.path)))
+						                            .Where(x =>PrefabUtility.IsPartOfVariantPrefab(x.obj) && basePrefabsSet.Contains(AssetDatabase.GetAssetPath(PrefabUtility.GetCorrespondingObjectFromOriginalSource(x.obj))))
+						                            .Select(x=>x.path)
+						                            .ToArray();
+
+						if (newVariants.Length == 0)
+							break;
+
+						basePrefabsSet.UnionWith(newVariants);
+					}
+
+					validAssets = basePrefabsSet.Select(AssetDatabase.LoadAssetAtPath<GameObject>)
+					                           .SelectMany(x=>x.GetComponents(propType))
+					                           .Select(x=>(path:AssetDatabase.GetAssetPath(x), type:x.GetType()))
+					                           .ToArray();
+
+					// validAssets = AssetDatabase.FindAssets("t:prefab")
+					//                            .Select(AssetDatabase.GUIDToAssetPath)
+					//                            .Where(x=>validScriptPathsSet.Overlaps(AssetDatabase.GetDependencies(x, false)))
+					//                            .Select(AssetDatabase.LoadAssetAtPath<GameObject>)
+					//                            .SelectMany(x=>x.GetComponents(propType))
+					//                            .Select(x=>(path:AssetDatabase.GetAssetPath(x), type:x.GetType()))
+					//                            .ToArray();
+					
+					EditorUtility.ClearProgressBar();
+				} else
+				{
+					EditorUtility.DisplayProgressBar("Project wide prefab search", "Slower, but finds inbuilt types. Will be faster on repeat uses", 0.5f);
+					validAssets = AssetDatabase.FindAssets("t:prefab")
+					                           .Select(AssetDatabase.GUIDToAssetPath)
+					                           .Select(AssetDatabase.LoadAssetAtPath<GameObject>)
+					                           .SelectMany(x=>x.GetComponents(propType))
+					                           .Select(x=>(path:AssetDatabase.GetAssetPath(x), type:x.GetType()))
+					                           .ToArray();
+					EditorUtility.ClearProgressBar();
+				}
+			} else
+			{
+				Assert.IsTrue(typeof(GameObject).IsAssignableFrom(propType));
+				validAssets = AssetDatabase.FindAssets("t:prefab")
+				                           .Select(x=>(path:AssetDatabase.GUIDToAssetPath(x), type:typeof(GameObject)))
+				                           .ToArray();
+			}
+
+			var guiOptions = validAssets.Select(x => new GUIContent($"{Path.GetFileName(x.path)} ({x.type.Name})", EditorIconUtility.GetIcon(x.type)))
+			    .ToArray();
+
+			var callbackProperty = property.Copy();
+			var callbackSO = callbackProperty.serializedObject;
+			OptionPopupWindow.Create($"Pick Project asset {propType.Name}",
+			                         index =>
+			                         {
+				                         var selection = validAssets[index];
+				                         property.objectReferenceValue = AssetDatabase.LoadAssetAtPath(selection.path, selection.type);
+				                         callbackSO.ApplyModifiedProperties();
+			                         },
+			                         guiOptions,
+			                         EditorIconUtility.GetIcon(propType),
+									"prefab root components only");
+		}
 
 		static void DrawScriptableObjectFoldout(Rect position, SerializedProperty property)
 		{
@@ -152,7 +294,7 @@ namespace cratesmith.assetui
 				? property.objectReferenceValue as ScriptableObject
 				: null;
 
-			if (!data)
+			if (!data || !s_CyclicCheck.Add(data))
 			{
 				return;
 			}
@@ -166,60 +308,64 @@ namespace cratesmith.assetui
 			                                        "",
 			                                        true);
 			GUI.color = Color.white;
-			if (!property.isExpanded)
+
+			if (property.isExpanded)
 			{
-				return;
-			}
-			
-			SerializedObject so = new SerializedObject(data);
-			int count = 0;
-			float fullHeight = 0f;
-			SerializedProperty iterator = so.GetIterator();
-			iterator.NextVisible(true);
-			while (iterator.NextVisible(false))
-			{
-				float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
-				fullHeight += childHeight + EditorGUIUtility.standardVerticalSpacing;
-				++count;
-			}
-			fullHeight = Mathf.Max(EditorGUIUtility.singleLineHeight, fullHeight);
-				
-			var boxRect = new Rect(position.x + EditorGUI.indentLevel * 15f,
-			                       position.y + EditorGUIUtility.singleLineHeight,
-			                       position.width - EditorGUI.indentLevel * 15f + 2,
-			                       Mathf.Max(fullHeight, EditorGUIUtility.singleLineHeight));
-
-			GUI.Box(boxRect, "");
-
-			if (count == 0)
-				GUI.Label(boxRect, "No properties");
-
-			var prevLabelWidth = EditorGUIUtility.labelWidth;
-				
-			EditorGUI.BeginChangeCheck();
-
-			using (new EditorGUI.IndentLevelScope())
-			{
-				float y = position.y + EditorGUIUtility.singleLineHeight + EditorGUIUtility.standardVerticalSpacing;
-				iterator = so.GetIterator();
+				SerializedObject so = new SerializedObject(data);
+				int count = 0;
+				float fullHeight = 0f;
+				SerializedProperty iterator = so.GetIterator();
 				iterator.NextVisible(true);
+
 				while (iterator.NextVisible(false))
 				{
-					var current = iterator.Copy();
 					float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
-					Rect childRect = new Rect(position.x, y, position.width, childHeight);
-					EditorGUI.PropertyField(childRect, current, true);
-					y += childHeight + EditorGUIUtility.standardVerticalSpacing;
+					fullHeight += childHeight + EditorGUIUtility.standardVerticalSpacing;
 					++count;
 				}
+
+				fullHeight = Mathf.Max(EditorGUIUtility.singleLineHeight, fullHeight);
+
+				var boxRect = new Rect(position.x + EditorGUI.indentLevel * 15f,
+				                       position.y + EditorGUIUtility.singleLineHeight,
+				                       position.width - EditorGUI.indentLevel * 15f + 2,
+				                       Mathf.Max(fullHeight, EditorGUIUtility.singleLineHeight));
+
+				GUI.Box(boxRect, "");
+
+				if (count == 0)
+					GUI.Label(boxRect, "No properties");
+
+				var prevLabelWidth = EditorGUIUtility.labelWidth;
+
+				EditorGUI.BeginChangeCheck();
+
+				//using (new EditorGUI.IndentLevelScope())
+				{
+					float y = position.y + EditorGUIUtility.singleLineHeight + EditorGUIUtility.standardVerticalSpacing;
+					iterator = so.GetIterator();
+					iterator.NextVisible(true);
+
+					while (iterator.NextVisible(false))
+					{
+						var current = iterator.Copy();
+						float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
+						Rect childRect = new Rect(position.x + 15, y, position.width - 15, childHeight);
+						EditorGUI.PropertyField(childRect, current, true);
+						y += childHeight + EditorGUIUtility.standardVerticalSpacing;
+						++count;
+					}
+				}
+
+				if (EditorGUI.EndChangeCheck())
+				{
+					so.ApplyModifiedProperties();
+				}
+
+				EditorGUIUtility.labelWidth = prevLabelWidth;
 			}
 
-
-			if (EditorGUI.EndChangeCheck())
-			{
-				so.ApplyModifiedProperties();
-			}
-			EditorGUIUtility.labelWidth = prevLabelWidth;
+			s_CyclicCheck.Remove(data);
 		}
 		
 		static void DrawPopoutInspector(Rect position, SerializedProperty property, Rect popupWindowRect)
@@ -255,8 +401,21 @@ namespace cratesmith.assetui
 		static Type s_AssetFileNameExtensionAttributeType;
 		static Type AssetFileNameExtensionAttributeType => s_AssetFileNameExtensionAttributeType = s_AssetFileNameExtensionAttributeType ?? AllTypes.Where(x => x.Name == "AssetFileNameExtensionAttribute").First();
 		static PropertyInfo s_AssetFileNameExtensionAttributePreferredInfoPI;
+		static MonoScript[] s_CachedScripts;
 		static PropertyInfo AssetFileNameExtensionAttributePreferredInfoPI => s_AssetFileNameExtensionAttributePreferredInfoPI = s_AssetFileNameExtensionAttributePreferredInfoPI ?? AssetFileNameExtensionAttributeType.GetProperty("preferredExtension");
-		
+
+
+		private static bool CanCreateAssetType(Type t)
+		{
+			if (t == null)
+				return false;
+			
+			if (typeof(ScriptableObject).IsAssignableFrom(t))
+			{
+				return GetAssetAttribute(t) != null;
+			}
+			return typeof(GameObject).IsAssignableFrom(t) || typeof(Component).IsAssignableFrom(t);
+		}
 		
 		private static Attribute GetAssetAttribute(Type t)
 		{
@@ -279,62 +438,86 @@ namespace cratesmith.assetui
 			return null;
 		}
 		
-		private static string GetAttributeDisplayName(Type type, Attribute attribute)
+		private static string GetAssetDisplayName(Type type)
 		{
-			if (attribute is CreateAssetMenuAttribute caa)
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
 			{
-				return !string.IsNullOrEmpty(caa.menuName)
-					? caa.menuName.Substring(caa.menuName.LastIndexOf('/') + 1)
-					: type.Name;
-			}
-			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
-			{
-				return type.Name;
-			}
-			throw new ArgumentException("Unkown attribute type");
-		}
+				var attribute = GetAssetAttribute(type);
+				if (attribute is CreateAssetMenuAttribute caa)
+				{
+					return !string.IsNullOrEmpty(caa.menuName)
+						? caa.menuName.Substring(caa.menuName.LastIndexOf('/') + 1)
+						: type.Name;
+				} else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+				{
+					return type.Name;
+				}
 
-		private static string GetAttributeFileName(Type type, Attribute attribute)
-		{
-			if (attribute is CreateAssetMenuAttribute caa)
-				return caa.fileName;
-			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
-			{
-				return null;
+				throw new ArgumentException("Unkown attribute type");
 			}
 
-			throw new ArgumentException("Unkown attribute type");
+			return type.Name;
 		}
-		
-		private static string GetAttributeFileExtension(Type type, Attribute attribute)
+
+		private static string GetAssetFileName(Type type)
 		{
-			if (attribute is CreateAssetMenuAttribute caa)
-				return $"{type.Name}.asset";
-			else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
 			{
-				return (string)AssetFileNameExtensionAttributePreferredInfoPI.GetValue(attribute);
+				var attribute = GetAssetAttribute(type);
+				if (attribute is CreateAssetMenuAttribute caa)
+					return caa.fileName;
+				else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+				{
+					return null;
+				}
+
+				throw new ArgumentException("Unkown attribute type");
+			}
+			
+			return null;
+		}
+
+		private static string GetAssetFileExtension(Type type)
+		{
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
+			{
+				var attribute = GetAssetAttribute(type);
+
+				if (attribute is CreateAssetMenuAttribute caa)
+					return $"{type.Name}.asset";
+				else if (AssetFileNameExtensionAttributeType.IsAssignableFrom(attribute.GetType()))
+				{
+					return (string)AssetFileNameExtensionAttributePreferredInfoPI.GetValue(attribute);
+				}
+
+				throw new ArgumentException("Unkown attribute type");
 			}
 
-			throw new ArgumentException("Unkown attribute type");
+			
+			if (typeof(GameObject).IsAssignableFrom(type))
+				return "prefab";
+			else if(typeof(Component).IsAssignableFrom(type))
+				return $"{type.Name}.prefab";
+
+			return null;
 		}
-		
-		static bool DrawCreateScriptableObject(Rect position, SerializedProperty property, Rect popupWindowRect)
+
+		static bool DrawCreateAsset(Rect position, SerializedProperty property, Rect popupWindowRect)
 		{
+			using var scope = new EditorGUI.IndentLevelScope(-EditorGUI.indentLevel);
 			Type propType = property.GetSerializedPropertyType();
-
-			if (propType == null || !typeof(ScriptableObject).IsAssignableFrom(propType))
+			if (propType == null)
 			{
 				return false;
 			}
 
-			if (!s_cachedTypes.TryGetValue(propType, out (Type type, Attribute attribute)[] validTypes))
+			if (!s_cachedTypes.TryGetValue(propType, out (Type type, string displayName, string fileName, string fileExtension)[] validTypes))
 			{
 				var candidates = AllTypes.Where(t => t != null && !t.IsAbstract && propType.IsAssignableFrom(t))
-				                         .Select(t => (type: t, attribute: GetAssetAttribute(t))).ToArray();
+				                         .Where(t=>CanCreateAssetType(t))
+				                         .Select(t => (type: t, menuName:GetAssetDisplayName(t), fileName: GetAssetFileName(t), extension:GetAssetFileExtension(t))).ToArray();
 				
-				s_cachedTypes[propType] = validTypes = candidates
-				                                       .Where(t => t.attribute != null)
-				                                       .ToArray();
+				s_cachedTypes[propType] = validTypes = candidates.ToArray();
 			}
 
 			if (validTypes.Length == 0)
@@ -342,68 +525,174 @@ namespace cratesmith.assetui
 				return false;
 			}
 
-			if (ImageButton(position, NewButton, "Create Asset..."))
+			var selection = property.serializedObject.isEditingMultipleObjects || !(property.serializedObject.targetObject is ScriptableObject) || !(typeof(ScriptableObject).IsAssignableFrom(propType)) 
+				? (ImageButton(position, NewButton, "New Asset...") ? 0:-1)
+				: ImagePopup(position, NewButton, "New Asset...", new [] {"New external asset...", "New sub asset..." });
+			
+			if (selection!=-1)
 			{
-				string filepathPrefix = property.serializedObject.isEditingMultipleObjects
-					? GetPath(property.serializedObject.targetObject)
-					: GetLongestCommonPrefix(property.serializedObject.targetObjects
-					                                 .Select(x => Path.GetDirectoryName(GetPath(x))).ToArray());
-
-				GUIContent[] _options = validTypes.Select(x => (name: GetAttributeDisplayName(x.type, x.attribute), icon: EditorIconUtility.GetIcon(x.type)))
+				GUIContent[] _options = validTypes.Select(x => (name: x.displayName, icon: EditorIconUtility.GetIcon(x.type)))
 				                                  .Select(x => new GUIContent(x.name, x.icon))
 				                                  .ToArray();
 
-				string defaultOutputPath = GenerateUniqueAssetPath($"{filepathPrefix}/{property.serializedObject.targetObject.name}");
-
-				string callbackPropPath = property.propertyPath;
-				SerializedObject callbackSO = new SerializedObject(property.serializedObject.targetObjects);
 
 				Texture2D icon = EditorIconUtility.GetIcon(propType);
+				var callbackPropery = property.Copy();
 
-				CreateScriptableObjectWindow.Create($"Create {propType.Name}",
-				                                    index =>
-				                                    {
-					                                    SerializedProperty prop = callbackSO.FindProperty(callbackPropPath);
-					                                    (Type type, Attribute attribute) typeData = validTypes[index];
+				switch (selection)
+				{
+					case 0: 
+						OptionPopupWindow.Create($"Create External Asset {propType.Name}",
+						                         index =>
+						                         {
+							                         (Type _, string displayName, string fileName, string fileExtension) = validTypes[index];
+														
+							                         if (!CreateExternalAssetPopup(callbackPropery, validTypes[index].type, fileName, fileExtension, displayName, out Object instance))
+							                         {
+								                         return;
+							                         }
 
-					                                    var attribFilename = GetAttributeFileName(typeData.type, typeData.attribute);
-					                                    string defaultName = string.IsNullOrEmpty(attribFilename)
-						                                    ? Path.GetFileNameWithoutExtension(defaultOutputPath)
-						                                    : attribFilename;
+							                         EditorGUIUtility.PingObject(instance);
+							                         SerializedProperty prop = new SerializedObject(property.serializedObject.targetObjects).FindProperty(callbackPropery.propertyPath);
+							                         prop.objectReferenceValue = instance;
+							                         prop.serializedObject.ApplyModifiedProperties();
+						                         },
+						                         _options,
+						                         icon);
+						break;
+					case 1: 
+						OptionPopupWindow.Create($"Create Sub Asset {propType.Name}",
+												index =>
+												{
+													(Type _, string _, string _, string fileExtension) = validTypes[index];
 
-					                                    var displayName = GetAttributeDisplayName(typeData.type, typeData.attribute);
-					                                    var extension = GetAttributeFileExtension(typeData.type, typeData.attribute);
-					                                    
-					                                    string filePath = EditorUtility.SaveFilePanel($"Create {displayName}",
-					                                                                                  $"{filepathPrefix}",
-					                                                                                  defaultName,
-					                                                                                  extension);
+													Type type = validTypes[index].type;
 
-					                                    if (string.IsNullOrEmpty(filePath))
-					                                    {
-						                                    return;
-					                                    }
+													Object instance = null;
 
-					                                    filePath = GetRelativePath(Directory.GetParent(Application.dataPath).FullName + Path.DirectorySeparatorChar, filePath);
+													if (callbackPropery.serializedObject.isEditingMultipleObjects)
+													    return;
+													
+													var name = callbackPropery.serializedObject.targetObject is Component 
+													    ? $"{callbackPropery.serializedObject.targetObject.name}.{callbackPropery.GetSanitizedPropertyPath()}"
+													    : $"{callbackPropery.GetSanitizedPropertyPath()}";
+													
+													TextFieldPopupWindow.Create($"{fileExtension}", defaultValue:name, icon:EditorIconUtility.GetIcon(type), action: value =>
+													{
+														instance = CreateSubAssetOfType(type, property.serializedObject.targetObject, $"{value}");
+													
+														if (!instance)
+														{
+															return;
+														}
 
-					                                    ScriptableObject instance = ScriptableObject.CreateInstance(validTypes[index].type);
-					                                    CreateAsset(instance, filePath);
-					                                    EditorGUIUtility.PingObject(instance);
-					                                    prop.objectReferenceValue = instance;
-					                                    prop.serializedObject.ApplyModifiedProperties();
-					                                    PopupEditorWindow.Create(prop.objectReferenceValue, popupWindowRect);
-				                                    },
-				                                    _options,
-				                                    defaultOutputPath,
-				                                    icon);
+														EditorGUIUtility.PingObject(instance);
+														SerializedProperty prop = new SerializedObject(callbackPropery.serializedObject.targetObjects).FindProperty(callbackPropery.propertyPath);
+														prop.objectReferenceValue = instance;
+														prop.serializedObject.ApplyModifiedProperties();
+													});
+												},
+												_options,
+												icon);
+						break;
+				}
 			}
 
 			return true;
+		}
+		static bool CreateExternalAssetPopup(SerializedProperty property, Type type, string fileName, string fileExtension, string displayName, out Object instance)
+		{
+			string filepathPrefix = property.serializedObject.isEditingMultipleObjects
+				? GetPath(property.serializedObject.targetObject)
+				: GetLongestCommonPrefix(property.serializedObject.targetObjects
+				                                 .Select(x => Path.GetDirectoryName(GetPath(x))).ToArray());
+
+			string defaultOutputPath = GenerateUniqueAssetPath($"{filepathPrefix}/{property.serializedObject.targetObject.name}");
+
+			string defaultName = string.IsNullOrEmpty(fileName)
+				? Path.GetFileNameWithoutExtension(defaultOutputPath)
+				: fileName;
+
+			var extension = fileExtension;
+
+			string filePath = EditorUtility.SaveFilePanel($"Create {displayName}",
+			                                              $"{filepathPrefix}",
+			                                              defaultName,
+			                                              extension);
+
+			if (string.IsNullOrEmpty(filePath))
+			{
+				instance = null;
+				return false;
+			}
+
+			filePath = GetRelativePath(Directory.GetParent(Application.dataPath).FullName + Path.DirectorySeparatorChar, filePath);
+
+			Object asset;
+			(asset, instance) = CreateAssetOfType(type, filePath);
+			return true;
+		}
+
+		static (Object asset, Object instance) CreateAssetOfType(Type type, string filePath)
+		{
+			Object asset = null;
+			Object instance = null;
+
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
+			{
+				asset = instance = ScriptableObject.CreateInstance(type);
+				CreateAsset(asset, filePath);
+			}
+			else if (typeof(Component).IsAssignableFrom(type))
+			{
+				var go = new GameObject(Path.GetFileNameWithoutExtension(filePath),new []{type});
+				var goAsset = PrefabUtility.SaveAsPrefabAsset(go, filePath);
+				Object.DestroyImmediate(go);
+				instance = goAsset.GetComponent(type);
+				asset = goAsset;
+					
+			} else if (typeof(GameObject).IsAssignableFrom(type))
+			{
+				var go = new GameObject(Path.GetFileNameWithoutExtension(filePath));
+				var goAsset = PrefabUtility.SaveAsPrefabAsset(go, filePath);
+				Object.DestroyImmediate(go);
+				asset = instance = goAsset;
+			}
+
+			return (asset, instance);
+		}
+		
+		static Object CreateSubAssetOfType(Type type, Object parentAsset, string assetName)
+		{
+			Object instance = null;
+
+			if (typeof(ScriptableObject).IsAssignableFrom(type))
+			{
+				instance = ScriptableObject.CreateInstance(type);
+				instance.name = assetName;
+				AddObjectToAsset(instance, parentAsset);
+				SaveAssets();
+			}
+
+			return instance;
 		}
 
 		static bool ImageButton(Rect position, Texture2D buttonImg, string tooltip)
 		{
 			bool result = GUI.Button(position, new GUIContent("",tooltip));
+			Vector2 imgSize = new Vector2(buttonImg.width, buttonImg.height);
+			Rect imgRect = new Rect(position.center - imgSize / 2f, imgSize);
+
+			Color prevColor = GUI.color;
+			GUI.color = EditorGUIUtility.isProSkin ? Color.white : Color.gray;
+			GUI.DrawTexture(imgRect, buttonImg);
+			GUI.color = prevColor;
+			return result;
+		}
+		
+		static int ImagePopup(Rect position, Texture2D buttonImg, string tooltip, string[] options)
+		{
+			int result = EditorGUI.Popup(position, -1, options,"button");
 			Vector2 imgSize = new Vector2(buttonImg.width, buttonImg.height);
 			Rect imgRect = new Rect(position.center - imgSize / 2f, imgSize);
 
