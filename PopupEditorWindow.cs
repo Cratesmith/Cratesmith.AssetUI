@@ -42,14 +42,14 @@ namespace cratesmith.assetui
 		{
 			Popup(Selection.activeObject);
 		}
-		
+
 		static void Popup(Object obj)
 		{
 			if (obj is GameObject gameObject)
 			{
 				GameObjectPopup(gameObject);
 			} else if (obj)
-				Create(obj, new Rect(GUIUtility.GUIToScreenPoint(Event.current.mousePosition), new Vector2(600, 500)));
+				Create(obj,GUIUtility.GUIToScreenPoint(Event.current.mousePosition), new Vector2(600, 500));
 		}
 
 		[MenuItem(MENUITEM_PREFABS_STRING)]
@@ -125,7 +125,7 @@ namespace cratesmith.assetui
 			                        .ToArray();
 
 			OptionPopupWindow.Create("Select Component/GameObject",
-			                         id => Create(options[id], new Rect(GUIUtility.GUIToScreenPoint(Event.current.mousePosition), new Vector2(600, 500))),
+			                         id => Create(options[id], GUIUtility.GUIToScreenPoint(Event.current.mousePosition), new Vector2(600, 500)),
 			                         options.Select(x => new GUIContent($"{x.GetType().Name} ({x.name})", EditorIconUtility.GetIcon(x))).ToArray());
 		}
 
@@ -142,6 +142,8 @@ namespace cratesmith.assetui
 			return result;
 		}
 
+		public static PopupEditorWindow Create(Object obj, Vector2 position, Vector2 size) => Create(obj, new Rect(position - Vector2.right * (size.x * .5f), size));
+		
 		public static PopupEditorWindow Create(Object obj, Rect rect)
 		{
 			var window = CreateInstance<PopupEditorWindow>();
@@ -174,7 +176,6 @@ namespace cratesmith.assetui
 			if (!icon) icon = AssetDatabase.GetCachedIcon(AssetDatabase.GetAssetPath(obj)) as Texture2D;
 			
 			titleContent = new GUIContent(m_target.name, icon);
-			
 		}
 
 		void OnEnable()

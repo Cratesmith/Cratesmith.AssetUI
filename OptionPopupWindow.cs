@@ -4,6 +4,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Events;
+using static UnityEditor.AssetDatabase;
 
 namespace cratesmith.assetui
 {
@@ -29,6 +30,14 @@ namespace cratesmith.assetui
         static readonly Color    s_OddColor  = new Color(0.75f, 0.75f, 0.75f, 1f);
         static          GUIStyle s_ButtonStyle;
 
+        static Texture2D s_TransHeart; 
+        static Texture2D TransHeart => s_TransHeart
+            ? s_TransHeart
+            : s_TransHeart = LoadAssetAtPath<Texture2D>(
+                GUIDToAssetPath(
+                    FindAssets("trans_heart t:texture").FirstOrDefault()));
+
+        
         void OnLostFocus()
         {
             Close();
@@ -167,7 +176,14 @@ namespace cratesmith.assetui
             
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    GUILayout.Label(extraText);
+                    if(!string.IsNullOrEmpty(extraText))
+                        GUILayout.Label(extraText, GUILayout.Width(Screen.width-150));
+                    else
+                    {
+                        GUI.color = new Color(.75f, .75f, .75f, 1f);
+                        GUILayout.Label(new GUIContent("Trans rights!",TransHeart), GUILayout.Height(16), GUILayout.Width(Screen.width-150));
+                        GUI.color = Color.white;
+                    }
                     GUILayout.FlexibleSpace();
 
                     if (GUILayout.Button("Cancel", GUILayout.Width(60))
@@ -188,7 +204,7 @@ namespace cratesmith.assetui
 
             if(updateCount > 30)
             {
-                if (cancelled)
+                if (cancelled)            
                 {
                     Close();
                 }

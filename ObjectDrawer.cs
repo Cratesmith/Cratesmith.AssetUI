@@ -213,19 +213,48 @@ namespace cratesmith.assetui
 				if (validScripts.Count > 0)
 				{
 					var validScriptPathsSet = new HashSet<string>(validScripts.Keys);
+					var allPrefabs = AssetDatabase.FindAssets("t:prefab")
+					                              .Select(AssetDatabase.GUIDToAssetPath)
+					                              .Select(x=>(path:x, dependencies:AssetDatabase.GetDependencies(x,false).ToHashSet()))
+					                              .ToArray();
 					
-					EditorUtility.DisplayProgressBar("Prefab lookup search", "Should just take a second", 0.5f);
-					validAssets = AssetDatabase.FindAssets("t:prefab")
-					                           .Select(AssetDatabase.GUIDToAssetPath)
-					                           .Where(x=>validScriptPathsSet.Overlaps(AssetDatabase.GetDependencies(x, false)))
-					                           .Select(AssetDatabase.LoadAssetAtPath<GameObject>)
+					EditorUtility.DisplayProgressBar("Prefab lookup search", "Quick search. Won't find built in types. Will be faster on repeat uses", 0.5f);
+
+					var basePrefabsSet = allPrefabs.Where(x => validScriptPathsSet.Overlaps(x.dependencies))
+					                               .Select(x=>x.path)
+					                                .ToHashSet();
+
+					while(true)
+					{
+						var newVariants = allPrefabs.Where(x => x.dependencies.Overlaps(basePrefabsSet) && !basePrefabsSet.Contains(x.path))
+						                            .Select(x => (path: x.path, obj: AssetDatabase.LoadAssetAtPath<GameObject>(x.path)))
+						                            .Where(x =>PrefabUtility.IsPartOfVariantPrefab(x.obj) && basePrefabsSet.Contains(AssetDatabase.GetAssetPath(PrefabUtility.GetCorrespondingObjectFromOriginalSource(x.obj))))
+						                            .Select(x=>x.path)
+						                            .ToArray();
+
+						if (newVariants.Length == 0)
+							break;
+
+						basePrefabsSet.UnionWith(newVariants);
+					}
+
+					validAssets = basePrefabsSet.Select(AssetDatabase.LoadAssetAtPath<GameObject>)
 					                           .SelectMany(x=>x.GetComponents(propType))
 					                           .Select(x=>(path:AssetDatabase.GetAssetPath(x), type:x.GetType()))
 					                           .ToArray();
+
+					// validAssets = AssetDatabase.FindAssets("t:prefab")
+					//                            .Select(AssetDatabase.GUIDToAssetPath)
+					//                            .Where(x=>validScriptPathsSet.Overlaps(AssetDatabase.GetDependencies(x, false)))
+					//                            .Select(AssetDatabase.LoadAssetAtPath<GameObject>)
+					//                            .SelectMany(x=>x.GetComponents(propType))
+					//                            .Select(x=>(path:AssetDatabase.GetAssetPath(x), type:x.GetType()))
+					//                            .ToArray();
+					
 					EditorUtility.ClearProgressBar();
 				} else
 				{
-					EditorUtility.DisplayProgressBar("Project wide prefab search", "This only happens for inbuilt types", 0.5f);
+					EditorUtility.DisplayProgressBar("Project wide prefab search", "Slower, but finds inbuilt types. Will be faster on repeat uses", 0.5f);
 					validAssets = AssetDatabase.FindAssets("t:prefab")
 					                           .Select(AssetDatabase.GUIDToAssetPath)
 					                           .Select(AssetDatabase.LoadAssetAtPath<GameObject>)
@@ -242,7 +271,7 @@ namespace cratesmith.assetui
 				                           .ToArray();
 			}
 
-			var guiOptions = validAssets.Select(x => new GUIContent($"{Path.GetFileNameWithoutExtension(x.path)} ({x.type.Name})", EditorIconUtility.GetIcon(x.type)))
+			var guiOptions = validAssets.Select(x => new GUIContent($"{Path.GetFileName(x.path)} ({x.type.Name})", EditorIconUtility.GetIcon(x.type)))
 			    .ToArray();
 
 			var callbackProperty = property.Copy();
@@ -255,7 +284,8 @@ namespace cratesmith.assetui
 				                         callbackSO.ApplyModifiedProperties();
 			                         },
 			                         guiOptions,
-			                         EditorIconUtility.GetIcon(propType));
+			                         EditorIconUtility.GetIcon(propType),
+									"prefab root components only");
 		}
 
 		static void DrawScriptableObjectFoldout(Rect position, SerializedProperty property)
