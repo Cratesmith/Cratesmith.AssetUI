@@ -215,14 +215,13 @@ namespace cratesmith.assetui
 					var validScriptPathsSet = new HashSet<string>(validScripts.Keys);
 					var allPrefabs = AssetDatabase.FindAssets("t:prefab")
 					                              .Select(AssetDatabase.GUIDToAssetPath)
-					                              .Select(x=>(path:x, dependencies:AssetDatabase.GetDependencies(x,false).ToHashSet()))
+					                              .Select(x=>(path:x, dependencies:new HashSet<string>(AssetDatabase.GetDependencies(x,false))))
 					                              .ToArray();
 					
 					EditorUtility.DisplayProgressBar("Prefab lookup search", "Quick search. Won't find built in types. Will be faster on repeat uses", 0.5f);
 
-					var basePrefabsSet = allPrefabs.Where(x => validScriptPathsSet.Overlaps(x.dependencies))
-					                               .Select(x=>x.path)
-					                                .ToHashSet();
+					var basePrefabsSet = new HashSet<string>(allPrefabs.Where(x => validScriptPathsSet.Overlaps(x.dependencies))
+					                               .Select(x=>x.path));
 
 					while(true)
 					{
