@@ -27,9 +27,9 @@ namespace cratesmith.assetui
 					FindAssets("popout_pin t:texture").FirstOrDefault()));
 		
 		private const string MENUITEM_WINDOW_STRING  = "Window/View in Popup Inspector... &\\";
-		private const string MENUITEM_PREFABS_STRING = "Window/Go to in scene and prefabs... ^t";
+		private const string MENUITEM_PREFABS_STRING = "Window/Go to in scene and prefabs... %t";
 		private const string MENUITEM_ASSETS_STRING  = "Window/Go to in scriptable objects... &t";
-		private const string MENUITEM_ALLASSETS_STRING  = "Window/Go to in all assets... ^#t";
+		private const string MENUITEM_ALLASSETS_STRING  = "Window/Go to in all assets... %#t";
 		
 		[MenuItem(MENUITEM_WINDOW_STRING, true)]
 		public static bool _PopupEditorWindowMenuItem()
@@ -59,11 +59,14 @@ namespace cratesmith.assetui
 			var extraObjects = new List<Object>();
 			for (int i = 0; i < EditorSceneManager.sceneCount; i++)
 			{
-				var roots = EditorSceneManager.GetSceneAt(i).GetRootGameObjects();
+				var scene = EditorSceneManager.GetSceneAt(i);
+				if (!scene.isLoaded)
+					continue;
 
-				extraObjects.AddRange(roots.SelectMany(x => x.GetComponentsInChildren<Transform>()
-				                                             .Select(x => x.gameObject)
-				                                             .Where(x => !PrefabUtility.IsPartOfPrefabInstance(x) || PrefabUtility.IsOutermostPrefabInstanceRoot(x))));
+				extraObjects.AddRange(scene.GetRootGameObjects()
+					                      .SelectMany(x => x.GetComponentsInChildren<Transform>()
+					                      .Select(x => x.gameObject)
+					                      .Where(x => !PrefabUtility.IsPartOfPrefabInstance(x) || PrefabUtility.IsOutermostPrefabInstanceRoot(x))));
 			}
 			
 			AssetPopup("t:prefab", title,extraObjects);
