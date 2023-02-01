@@ -1,4 +1,5 @@
 ﻿#if UNITY_EDITOR
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEditor;
@@ -72,8 +73,79 @@ namespace cratesmith.assetui
 					// Assert.IsNotNull(type);
 				}
 			}
-
+			
 			return currentType;
+		}
+		
+		public static FieldInfo GetSerializedPropertyFieldInfo(this SerializedProperty @this)
+		{
+			FieldInfo _LookupField(Type currentType1, string slice)
+			{
+				var type = currentType1;
+				FieldInfo fieldInfo1 = null;
+				while (type != null)
+				{
+					fieldInfo1 = type.GetField(slice, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+					if (fieldInfo1 == null)
+					{
+						type = type.BaseType;
+						continue;
+					}
+
+					break;
+				}
+
+				return fieldInfo1;
+			}
+			// follow reflection up to match path and return type of last node
+
+			// fix path for arrays
+			var path = GetSanitizedPropertyPath(@this);
+	
+			var currentType = @this.serializedObject.targetObject.GetType();
+			FieldInfo fieldInfo = null;
+			
+			string[] slices = path.Split('.', '[');
+			foreach (var slice in slices)
+			{
+				if (currentType == null)
+				{
+					Debug.LogErrorFormat("GetSerializedPropertyType Couldn't extract type from {0}:{1}",
+					                     @this.serializedObject.targetObject.name,
+					                     @this.propertyPath);
+
+					return null;
+				}
+
+				// array element: get array type if this is an array element
+				if (slice.EndsWith("]"))
+				{
+					if (currentType.IsArray)
+					{
+						currentType = currentType.GetElementType();
+					}
+					else if (currentType.IsGenericType && currentType.GetGenericTypeDefinition().IsAssignableFrom(typeof(List<>)))
+					{
+						currentType = currentType.GetGenericArguments()[0];
+					}
+					else
+					{
+						Debug.LogErrorFormat("GetSerializedPropertyType unkown array/container type for {0}:{1}",
+						                     @this.serializedObject.targetObject.name,
+						                     @this.propertyPath);
+
+						return null;
+					}
+				}
+				else // field: find field by same name as slice and match to type
+				{
+					fieldInfo = _LookupField(currentType, slice);
+					currentType = fieldInfo.FieldType;
+				}
+			}
+
+			return fieldInfo;
 		}
 	}
 }

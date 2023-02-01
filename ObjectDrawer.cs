@@ -22,7 +22,8 @@ namespace cratesmith.assetui
 	{
 		static Texture2D                 s_ExpandButton;
 		static Texture2D                 s_NewButton;
-		static HashSet<ScriptableObject> s_CyclicCheck = new HashSet<ScriptableObject>();
+		static HashSet<ScriptableObject> s_OnGuiCyclicCheck = new HashSet<ScriptableObject>();
+		static HashSet<ScriptableObject> s_GetHeightCyclicCheck = new HashSet<ScriptableObject>();
 
 		static Texture2D ExpandButton => s_ExpandButton
 			? s_ExpandButton
@@ -46,33 +47,41 @@ namespace cratesmith.assetui
 			                        && property.isExpanded 
 			                        && property.propertyType==SerializedPropertyType.ObjectReference 
 			                        && !property.hasMultipleDifferentValues
+			                        && property.GetSerializedPropertyFieldInfo().GetCustomAttribute<DontExpandSOAttribute>()==null
 				? property.objectReferenceValue as ScriptableObject
 				: null;
 			
-			if (data)
+			if (data && s_GetHeightCyclicCheck.Add(data))
 			{
-				baseHeight += EditorGUIUtility.standardVerticalSpacing * 2;
-
-				SerializedObject so = new SerializedObject(data);
-				SerializedProperty iterator = so.GetIterator();
-				iterator.NextVisible(true);
-
-				var foldoutHeight = 0f;
-				while (iterator.NextVisible(false))
+				try
 				{
-					var current = iterator.Copy();
-					foldoutHeight += EditorGUI.GetPropertyHeight(current, label, true) + EditorGUIUtility.standardVerticalSpacing;
+					baseHeight += EditorGUIUtility.standardVerticalSpacing * 2;
+
+					SerializedObject so = new SerializedObject(data);
+					SerializedProperty iterator = so.GetIterator();
+					iterator.NextVisible(true);
+
+					var foldoutHeight = 0f;
+					while (iterator.NextVisible(false))
+					{
+						var current = iterator.Copy();
+						foldoutHeight += EditorGUI.GetPropertyHeight(current, label, true) + EditorGUIUtility.standardVerticalSpacing;
+					}
+					baseHeight += Mathf.Max(EditorGUIUtility.singleLineHeight, foldoutHeight);
 				}
-				baseHeight += Mathf.Max(EditorGUIUtility.singleLineHeight, foldoutHeight);
+				catch (Exception e)
+				{
+					Debug.LogException(e);
+				}
+				s_GetHeightCyclicCheck.Remove(data);
 			}
+			
 			return baseHeight;
 		}
 		
 		public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
 		{
-            s_CyclicCheck.Clear();
             PropertyField(position, property, label);
-            s_CyclicCheck.Clear();
         }
 
 		public static void ObjectField(Rect position, SerializedProperty property, Type objType, GUIContent label)
@@ -215,13 +224,14 @@ namespace cratesmith.assetui
 					var validScriptPathsSet = new HashSet<string>(validScripts.Keys);
 					var allPrefabs = AssetDatabase.FindAssets("t:prefab")
 					                              .Select(AssetDatabase.GUIDToAssetPath)
-					                              .Select(x=>(path:x, dependencies:new HashSet<string>(AssetDatabase.GetDependencies(x,false))))
+					                              .Select(x=>(path:x, dependencies:AssetDatabase.GetDependencies(x,false).ToHashSet()))
 					                              .ToArray();
 					
 					EditorUtility.DisplayProgressBar("Prefab lookup search", "Quick search. Won't find built in types. Will be faster on repeat uses", 0.5f);
 
-					var basePrefabsSet = new HashSet<string>(allPrefabs.Where(x => validScriptPathsSet.Overlaps(x.dependencies))
-					                               .Select(x=>x.path));
+					var basePrefabsSet = allPrefabs.Where(x => validScriptPathsSet.Overlaps(x.dependencies))
+					                               .Select(x=>x.path)
+					                                .ToHashSet();
 
 					while(true)
 					{
@@ -276,7 +286,7 @@ namespace cratesmith.assetui
 			var callbackProperty = property.Copy();
 			var callbackSO = callbackProperty.serializedObject;
 			OptionPopupWindow.Create($"Pick Project asset {propType.Name}",
-			                         index =>
+			                         (index,_) =>
 			                         {
 				                         var selection = validAssets[index];
 				                         property.objectReferenceValue = AssetDatabase.LoadAssetAtPath(selection.path, selection.type);
@@ -293,78 +303,83 @@ namespace cratesmith.assetui
 				? property.objectReferenceValue as ScriptableObject
 				: null;
 
-			if (!data || !s_CyclicCheck.Add(data))
+			if (!data || !s_OnGuiCyclicCheck.Add(data))
 			{
 				return;
 			}
 
-			Rect foldoutRect = new Rect(position.position,
-			                            new Vector2(position.width, EditorGUIUtility.singleLineHeight));
-
-			GUI.color = Color.cyan;
-			property.isExpanded = EditorGUI.Foldout(foldoutRect,
-			                                        property.isExpanded,
-			                                        "",
-			                                        true);
-			GUI.color = Color.white;
-
-			if (property.isExpanded)
+			try
 			{
-				SerializedObject so = new SerializedObject(data);
-				int count = 0;
-				float fullHeight = 0f;
-				SerializedProperty iterator = so.GetIterator();
-				iterator.NextVisible(true);
+				Rect foldoutRect = new Rect(position.position,
+				                            new Vector2(position.width, EditorGUIUtility.singleLineHeight));
 
-				while (iterator.NextVisible(false))
+				GUI.color = Color.cyan; 
+				property.isExpanded = property.GetSerializedPropertyFieldInfo().GetCustomAttribute<DontExpandSOAttribute>()==null 
+				                      && EditorGUI.Foldout(foldoutRect, property.isExpanded, "", true);
+				GUI.color = Color.white;
+
+				if (property.isExpanded)
 				{
-					float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
-					fullHeight += childHeight + EditorGUIUtility.standardVerticalSpacing;
-					++count;
-				}
-
-				fullHeight = Mathf.Max(EditorGUIUtility.singleLineHeight, fullHeight);
-
-				var boxRect = new Rect(position.x + EditorGUI.indentLevel * 15f,
-				                       position.y + EditorGUIUtility.singleLineHeight,
-				                       position.width - EditorGUI.indentLevel * 15f + 2,
-				                       Mathf.Max(fullHeight, EditorGUIUtility.singleLineHeight));
-
-				GUI.Box(boxRect, "");
-
-				if (count == 0)
-					GUI.Label(boxRect, "No properties");
-
-				var prevLabelWidth = EditorGUIUtility.labelWidth;
-
-				EditorGUI.BeginChangeCheck();
-
-				//using (new EditorGUI.IndentLevelScope())
-				{
-					float y = position.y + EditorGUIUtility.singleLineHeight + EditorGUIUtility.standardVerticalSpacing;
-					iterator = so.GetIterator();
+					SerializedObject so = new SerializedObject(data);
+					int count = 0;
+					float fullHeight = 0f;
+					SerializedProperty iterator = so.GetIterator();
 					iterator.NextVisible(true);
 
 					while (iterator.NextVisible(false))
 					{
-						var current = iterator.Copy();
 						float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
-						Rect childRect = new Rect(position.x + 15, y, position.width - 15, childHeight);
-						EditorGUI.PropertyField(childRect, current, true);
-						y += childHeight + EditorGUIUtility.standardVerticalSpacing;
+						fullHeight += childHeight + EditorGUIUtility.standardVerticalSpacing;
 						++count;
 					}
+
+					fullHeight = Mathf.Max(EditorGUIUtility.singleLineHeight, fullHeight);
+
+					var boxRect = new Rect(position.x + EditorGUI.indentLevel * 15f,
+					                       position.y + EditorGUIUtility.singleLineHeight,
+					                       position.width - EditorGUI.indentLevel * 15f + 2,
+					                       Mathf.Max(fullHeight, EditorGUIUtility.singleLineHeight));
+
+					GUI.Box(boxRect, "");
+
+					if (count == 0)
+						GUI.Label(boxRect, "No properties");
+
+					var prevLabelWidth = EditorGUIUtility.labelWidth;
+
+					EditorGUI.BeginChangeCheck();
+
+					//using (new EditorGUI.IndentLevelScope())
+					{
+						float y = position.y + EditorGUIUtility.singleLineHeight + EditorGUIUtility.standardVerticalSpacing;
+						iterator = so.GetIterator();
+						iterator.NextVisible(true);
+
+						while (iterator.NextVisible(false))
+						{
+							var current = iterator.Copy();
+							float childHeight = EditorGUI.GetPropertyHeight(iterator, new GUIContent(iterator.displayName), true);
+							Rect childRect = new Rect(position.x + 15, y, position.width - 15, childHeight);
+							EditorGUI.PropertyField(childRect, current, true);
+							y += childHeight + EditorGUIUtility.standardVerticalSpacing;
+							++count;
+						}
+					}
+
+					if (EditorGUI.EndChangeCheck())
+					{
+						so.ApplyModifiedProperties();
+					}
+
+					EditorGUIUtility.labelWidth = prevLabelWidth;
 				}
 
-				if (EditorGUI.EndChangeCheck())
-				{
-					so.ApplyModifiedProperties();
-				}
-
-				EditorGUIUtility.labelWidth = prevLabelWidth;
 			}
-
-			s_CyclicCheck.Remove(data);
+			catch (Exception e)
+			{
+				Debug.LogException(e);
+			}
+			s_OnGuiCyclicCheck.Remove(data);
 		}
 		
 		static void DrawPopoutInspector(Rect position, SerializedProperty property, Rect popupWindowRect)
@@ -542,7 +557,7 @@ namespace cratesmith.assetui
 				{
 					case 0: 
 						OptionPopupWindow.Create($"Create External Asset {propType.Name}",
-						                         index =>
+						                         (index,_) =>
 						                         {
 							                         (Type _, string displayName, string fileName, string fileExtension) = validTypes[index];
 														
@@ -561,7 +576,7 @@ namespace cratesmith.assetui
 						break;
 					case 1: 
 						OptionPopupWindow.Create($"Create Sub Asset {propType.Name}",
-												index =>
+												(index,_) =>
 												{
 													(Type _, string _, string _, string fileExtension) = validTypes[index];
 
@@ -623,6 +638,14 @@ namespace cratesmith.assetui
 			{
 				instance = null;
 				return false;
+			}
+
+			// workaround to what seems to be a bug with the unity file save panel 
+			// it straight up just adds the extension into the default name... then if you go with that 
+			// you get filename.extension.extension
+			if (filePath.EndsWith($"{extension}.{extension}"))
+			{
+				filePath = filePath.Substring(0, filePath.Length - extension.Length - 1);
 			}
 
 			filePath = GetRelativePath(Directory.GetParent(Application.dataPath).FullName + Path.DirectorySeparatorChar, filePath);

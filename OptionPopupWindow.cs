@@ -10,7 +10,7 @@ namespace cratesmith.assetui
 {
     public class OptionPopupWindow : EditorWindow
     {
-        [Serializable] public class OnDoneAction : UnityEvent<int> {} 
+        [Serializable] public class OnDoneAction : UnityEvent<int, string> {} 
     
         [SerializeField]         GUIContent[] options;
         [SerializeField] private string       value;
@@ -25,12 +25,14 @@ namespace cratesmith.assetui
         [SerializeField]         int[]        optionIds;
         [SerializeField]         bool         scrollTo;  
         [SerializeField]         string       extraText;
-    
+
+        
         static readonly Color    s_EvenColor = Color.white;
         static readonly Color    s_OddColor  = new Color(0.75f, 0.75f, 0.75f, 1f);
+        static readonly Color    s_ShortcutColor  = new Color(0.35f, 0.35f, 0.35f, 1f);
         static          GUIStyle s_ButtonStyle;
 
-        static Texture2D s_TransHeart; 
+        static Texture2D s_TransHeart;
         static Texture2D TransHeart => s_TransHeart
             ? s_TransHeart
             : s_TransHeart = LoadAssetAtPath<Texture2D>(
@@ -44,10 +46,11 @@ namespace cratesmith.assetui
         }
 
         public static void Create(string title, 
-            UnityAction<int> action, 
+            UnityAction<int, string> action, 
             GUIContent[] options,
             Texture icon=null,
-            string extraText="")
+            string extraText="",
+            string initialText="")
         {
             var wnd = CreateInstance<OptionPopupWindow>();
             wnd.titleText = new GUIContent(title);
@@ -55,13 +58,14 @@ namespace cratesmith.assetui
             wnd.action.AddListener(action);
             wnd.icon = icon;
             wnd.initalized = false;
-            wnd.minSize = wnd.maxSize = new Vector2(320, Mathf.Min(320, options.Length*25f + 80f));
+            wnd.minSize = wnd.maxSize = new Vector2(320, Mathf.Min(352, options.Length*25f + 80f));
             wnd.ShowPopup();
             wnd.updateCount = 0;
             wnd.options = options;
             wnd.scrollPosition = Vector2.zero;
             wnd.scrollTo = false;
             wnd.extraText = extraText;
+            wnd.value = initialText;
         }
 
         void OnGUI()
@@ -81,6 +85,9 @@ namespace cratesmith.assetui
                 Focus();
             }
 
+            var cancelled = false;
+            var confirmed = false;
+
             if (Event.current.rawType == EventType.KeyDown)
             {
                 if (Event.current.keyCode == KeyCode.UpArrow)
@@ -97,11 +104,22 @@ namespace cratesmith.assetui
                     Event.current.Use();
                     Repaint();
                 }
+                if (Event.current.functionKey)
+                {
+                    for (int i = 0; i < Mathf.Min(12,options.Length); i++)
+                    {
+                        var keycode = (KeyCode)Enum.Parse(typeof(KeyCode), $"F{i+1}");
+                        if (Event.current.keyCode == keycode)
+                        {
+                            selectedIndex = i;
+                            scrollTo = true;
+                            Event.current.Use();
+                            confirmed = true;
+                        }
+                    }
+                }
             }
-
-            var cancelled = false;
-            var confirmed = false;
-
+            
             using (new EditorGUILayout.VerticalScope("box"))
             {
                 using (new EditorGUILayout.HorizontalScope())
@@ -151,11 +169,15 @@ namespace cratesmith.assetui
                     var prevBGColor = GUI.backgroundColor;
                     for (int i = 0; i < shownOptions.Length; i++)
                     {
+                        GUI.backgroundColor = s_ShortcutColor;
+                        GUILayout.Box(i<12?$"F{i+1}":"",s_ButtonStyle, GUILayout.Height(20));
+                        var lastRect = GUILayoutUtility.GetLastRect();
+                        var buttonRect = new Rect(lastRect.x + 30, lastRect.y, lastRect.width-30, lastRect.height);
                         GUI.backgroundColor = 
                             i == selectedIndex 
                                 ? Color.blue
                                 : (i%2==0 ? s_EvenColor : s_OddColor); 
-                        if (GUILayout.Button(shownOptions[i], s_ButtonStyle,GUILayout.Height(20)))
+                        if (GUI.Button(buttonRect,shownOptions[i], s_ButtonStyle))
                         {
                             selectedIndex = i;
                             confirmed = true;
@@ -163,7 +185,6 @@ namespace cratesmith.assetui
                 
                         if (Event.current.isKey && scrollTo && selectedIndex == i)
                         {
-                            var lastRect = GUILayoutUtility.GetLastRect();
                             scrollPosition.y = lastRect.y - lastRect.height*1.5f;
                             scrollTo = false;
                             Repaint();
@@ -210,7 +231,7 @@ namespace cratesmith.assetui
                 }
                 else if (confirmed && selectedIndex>=0 && selectedIndex < optionIds.Length)
                 {
-                    action.Invoke(optionIds[selectedIndex]);
+                    action.Invoke(optionIds[selectedIndex], value);
                     Close();
                 }
             }
@@ -244,7 +265,7 @@ namespace cratesmith.assetui
         void OnDisable()
         {
             EditorApplication.update -= ForceFocus;        
-            UnityEditor.EditorApplication.UnlockReloadAssemblies();
+            EditorApplication.UnlockReloadAssemblies();
         }
     }
 }
